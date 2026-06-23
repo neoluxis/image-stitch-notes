@@ -1,0 +1,452 @@
+% ============================================================
+% Chapter: 基于特征匹配的图像拼接方法
+% ============================================================
+\section{基于特征匹配的图像拼接方法}
+\label{sec:feature-matching}
+
+前三至六章所述方法均依赖\emph{离线相机标定}获取内外参，进而生成固定的LUT查表。本章介绍另一类不依赖预标定的拼接范式：\textbf{基于图像特征匹配的在线拼接}。其核心思路是直接从图像内容中提取和匹配特征点，实时估计帧间几何变换，完成对齐与融合。
+
+两种范式的根本差异如下：
+\begin{center}
+\small
+\begin{tabular}{p{4.5cm}p{4.5cm}p{4.5cm}}
+\toprule
+& \textbf{预标定 + LUT} & \textbf{特征匹配} \\
+\midrule
+标定需求 & 离线相机标定 & 无需标定 \\
+几何先验 & 已知$\mat{K}_i,\mat{R}_{ij},\vect{T}_{ij}$ & 从图像在线估计 \\
+变换模型 & 纯旋转／平面单应（视条件） & 一般单应／仿射／APAP等 \\
+运行开销 & 极低（仅remap） & 较高（特征检测+匹配+RANSAC） \\
+适用场景 & 固定相机阵列 & 手持拍摄、任意多图 \\
+视差处理 & 依赖深度或平面假设 & 通过APAP/SPHP等自适应 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+% --------------------------------------------------
+\subsection{特征点检测与描述}
+\label{sec:feature-detection}
+
+特征点是图像中具有显著局部结构且可稳定重检测的位置。一个好的特征检测器应具备\emph{尺度不变性}、\emph{旋转不变性}和\emph{一定程度的仿射不变性}。
+
+\subsubsection{SIFT——尺度不变特征变换}
+
+SIFT（Scale-Invariant Feature Transform）由Lowe于2004年提出，是最经典的尺度与旋转不变特征。
+
+\textbf{尺度空间构建。}对输入图像$I(x,y)$与不同尺度的高斯核$G(x,y,\sigma) = \frac{1}{2\pi\sigma^2}\exp\bigl(-(x^2+y^2)/2\sigma^2\bigr)$卷积，构建尺度空间：
+\begin{equation}
+L(x,y,\sigma) = G(x,y,\sigma) * I(x,y)
+\label{eq:sift-scale}
+\end{equation}
+
+对相邻尺度做差，得到高斯差分（Difference of Gaussian, DoG）金字塔：
+\begin{equation}
+D(x,y,\sigma) = L(x,y,k\sigma) - L(x,y,\sigma)
+\label{eq:sift-dog}
+\end{equation}
+其中$k = 2^{1/s}$，$s$为每倍频程（octave）的层数。DoG是对尺度归一化拉普拉斯算子$\sigma^2\nabla^2 G$的高效近似。
+
+\textbf{关键点定位。}在DoG金字塔中检测三维（$x,y,\sigma$）局部极值：每个像素与其$3\times 3\times 3$邻域（含上下尺度）的26个相邻点比较。对极值点利用DoG函数的二阶泰勒展开进行亚像素/亚尺度精定位：
+\begin{equation}
+\hat{\vect{x}} = -\Bigl(\frac{\partial^2 D}{\partial \vect{x}^2}\Bigr)\inv\frac{\partial D}{\partial \vect{x}}
+\label{eq:sift-subpixel}
+\end{equation}
+其中$\vect{x} = (x,y,\sigma)\trans$。剔除$\abs{D(\hat{\vect{x}})} < 0.03$的低对比度点和主曲率比值过大的边缘响应点（利用Hessian矩阵的迹与行列式之比）。
+
+\textbf{方向分配。}对每个关键点，在其所在尺度上统计邻域梯度方向的加权直方图（36 bins），峰值方向作为主方向：
+\begin{align}
+m(x,y) &= \sqrt{\bigl(L(x+1,y)-L(x-1,y)\bigr)^2 + \bigl(L(x,y+1)-L(x,y-1)\bigr)^2} \label{eq:sift-mag} \\
+\theta(x,y) &= \arctan\!\bigl(L(x,y+1)-L(x,y-1),\ L(x+1,y)-L(x-1,y)\bigr) \label{eq:sift-theta}
+\end{align}
+
+\textbf{描述子。}以关键点为中心旋转至主方向，取$16\times 16$邻域划分为$4\times 4$个子块，每个子块统计8方向梯度直方图，得到$4\times 4\times 8 = 128$维浮点描述子向量。经L2归一化后具备光照不变性。
+
+\subsubsection{ORB——面向实时应用}
+
+ORB（Oriented FAST and Rotated BRIEF）由Rublee等人于2011年提出，专为实时应用设计。其核心是：
+
+\textbf{FAST角点检测。}对像素$p$及其周围Bresenham圆上的16个点，若有连续$n$个（典型$n=12$）点的亮度均大于$I_p+t$或小于$I_p-t$，则$p$为角点。用Harris测度筛选最强的$N$个角点，并通过图像金字塔实现尺度不变。
+
+\textbf{方向计算。}利用灰度质心法（Intensity Centroid）为FAST角点分配方向。定义邻域矩：
+\begin{equation}
+m_{pq} = \sum_{x,y} x^p y^q\,I(x,y)
+\label{eq:orb-moment}
+\end{equation}
+质心$C = (m_{10}/m_{00},\ m_{01}/m_{00})$，方向角$\theta = \arctan(m_{01}, m_{10})$。
+
+\textbf{rBRIEF描述子。}BRIEF在关键点邻域随机选取256对像素$(x_i,y_i)$和$(x_i',y_i')$，比较灰度生成256-bit二进制串。ORB将采样模板按$\theta$旋转（steered BRIEF），并通过贪婪搜索选取256对去相关的采样对，确保描述子的方差最大、相关性最小。匹配使用Hamming距离。
+
+\subsubsection{检测器性能对比}
+
+\begin{center}
+\small
+\begin{tabular}{p{2.5cm}p{2.5cm}p{2.5cm}p{2.5cm}p{2.5cm}}
+\toprule
+& \textbf{SIFT} & \textbf{SURF} & \textbf{ORB} & \textbf{SuperPoint} \\
+\midrule
+尺度不变 & \checkmark & \checkmark & 金字塔近似 & \checkmark \\
+旋转不变 & \checkmark & \checkmark & \checkmark & \checkmark \\
+描述子维度 & 128 float & 64 float & 256 bit & 256 float \\
+专利 & 已过期 & 已过期 & 开源 & 开源 \\
+实时性 & 中等 & 较快 & 很快 & GPU加速 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+% --------------------------------------------------
+\subsection{特征匹配与粗筛选}
+\label{sec:feature-matching-detail}
+
+\subsubsection{距离度量和暴力匹配}
+
+给定两幅图像的特征点集合$\mathcal{F}_A = \{\vect{f}_i^A\}$和$\mathcal{F}_B = \{\vect{f}_j^B\}$，对$\mathcal{F}_A$中的每个描述子计算与$\mathcal{F}_B$中所有描述子的距离。浮点描述子（SIFT）使用L2距离，二值描述子（ORB）使用Hamming距离：
+\begin{equation}
+d_{ij} = \begin{cases}
+\|\vect{f}_i^A - \vect{f}_j^B\|_2 & \text{(SIFT)} \\
+\text{Hamming}(\vect{f}_i^A, \vect{f}_j^B) & \text{(ORB)}
+\end{cases}
+\label{eq:feature-distance}
+\end{equation}
+
+\subsubsection{Lowe比率检验}
+
+暴力匹配会引入大量误匹配。Lowe提出比率检验（Ratio Test）：对每个查询特征$\vect{f}_i^A$，找最近邻距离$d_1$和次近邻距离$d_2$，仅当两者比值低于阈值时保留匹配：
+\begin{equation}
+\frac{d_1}{d_2} < \tau, \qquad \tau \in [0.6, 0.8]
+\label{eq:ratio-test}
+\end{equation}
+
+该检验的直觉：正确匹配的描述子在特征空间中应有唯一的最近邻（$d_1 \ll d_2$），而误匹配中$d_1 \approx d_2$。
+
+\subsubsection{交叉检验}
+
+双向匹配——$\mathcal{F}_A \to \mathcal{F}_B$和$\mathcal{F}_B \to \mathcal{F}_A$——仅保留双向互为最近邻的匹配对。交叉检验比比率检验更严格，产生的内点率更高但匹配数更少。实际使用中常与比率检验联合。
+
+% --------------------------------------------------
+\subsection{几何验证与单应估计}
+\label{sec:ransac-homography}
+
+经过特征匹配，得到一组候选匹配对$\{(\vect{p}_i, \vect{p}_i')\}_{i=1}^{N}$，其中包含大量外点（outliers）。需要用鲁棒估计方法从噪声数据中恢复两图之间的几何变换。
+
+\subsubsection{平面单应建模}
+
+假设场景近似为平面，或两图像之间为纯旋转关系，则像素映射可由一个$3\times 3$的单应矩阵$\mat{H}$描述：
+\begin{equation}
+\vect{p}' \simto \mat{H}\,\vect{p},
+\qquad
+\mat{H} = \begin{bmatrix}
+h_{11} & h_{12} & h_{13} \\
+h_{21} & h_{22} & h_{23} \\
+h_{31} & h_{32} & h_{33}
+\end{bmatrix}
+\label{eq:feature-H}
+\end{equation}
+
+$\mat{H}$有8个自由度（齐次等价去掉尺度），每个匹配点对提供两个线性约束：
+\begin{align}
+u' &= \frac{h_{11}u + h_{12}v + h_{13}}{h_{31}u + h_{32}v + h_{33}} \label{eq:H-constraint-u} \\
+v' &= \frac{h_{21}u + h_{22}v + h_{23}}{h_{31}u + h_{32}v + h_{33}} \label{eq:H-constraint-v}
+\end{align}
+
+\subsubsection{归一化直接线性变换（Normalized DLT）}
+
+将\eqref{eq:H-constraint-u}--\eqref{eq:H-constraint-v}整理为关于$\vect{h} = \text{vec}(\mat{H}\trans)$的齐次线性方程：
+\begin{equation}
+\begin{bmatrix}
+\vect{0}\trans & -\vect{p}\trans & v'\vect{p}\trans \\
+\vect{p}\trans & \vect{0}\trans & -u'\vect{p}\trans
+\end{bmatrix}
+\vect{h} = \vect{0}
+\label{eq:dlt-system}
+\end{equation}
+
+4个点对提供$8\times 9$的矩阵，其零空间向量即为$\vect{h}$（通过SVD求解）。为提高数值稳定性，Hartley提出的归一化DLT先对各点集做平移+缩放变换使质心在原点且平均距离为$\sqrt{2}$，在归一化空间求解后再反变换：
+\begin{equation}
+\mat{H} = {\mat{T}'}\inv \cdot \mat{H}_{\text{norm}} \cdot \mat{T}
+\label{eq:normalized-dlt}
+\end{equation}
+
+\subsubsection{RANSAC鲁棒估计}
+
+直接对含外点的匹配对做DLT会严重偏离真实单应。RANSAC（Random Sample Consensus）通过对最小子集（4对匹配）重复随机采样来鲁棒估计：
+
+\begin{resultbox}[RANSAC单应估计算法]
+\textbf{输入：}匹配对集合$\mathcal{M} = \{(\vect{p}_i, \vect{p}_i')\}_{i=1}^{N}$，迭代次数$K$，内点阈值$\varepsilon$
+
+\textbf{输出：}最优单应$\mat{H}^*$与内点集$\mathcal{I}^*$
+
+\begin{enumerate}[leftmargin=*]
+  \item 初始化：最大内点数 $n_{\max} \gets 0$
+  \item 重复$K$次：
+  \begin{enumerate}
+    \item 从$\mathcal{M}$中随机采样4对匹配；
+    \item 用归一化DLT计算候选单应$\mat{H}_k$；
+    \item 计算所有$N$对匹配的对称重投影误差：
+    \[
+    e_i = \|\vect{p}_i' - \pi(\mat{H}_k\,\vect{p}_i)\|^2
+        + \|\vect{p}_i - \pi(\mat{H}_k\inv\,\vect{p}_i')\|^2
+    \]
+    \item 统计内点数$n_k = \abs{\{i \mid e_i < \varepsilon^2\}}$；
+    \item 若$n_k > n_{\max}$，更新$\mat{H}^* \gets \mat{H}_k$，$n_{\max} \gets n_k$。
+  \end{enumerate}
+  \item 用所有内点对$\mat{H}^*$做一次最小二乘精化（可选：LM优化）。
+\end{enumerate}
+\end{resultbox}
+
+\noindent\textbf{RANSAC迭代次数的确定。}设内点率为$\varepsilon$，每次采样$m=4$个点，则一次采样全部为内点的概率为$\varepsilon^m$。欲使$K$次采样中至少有一次全为内点的概率达到$p$（通常取$p=0.99$）：
+\begin{equation}
+K = \frac{\log(1-p)}{\log(1-\varepsilon^m)}
+\label{eq:ransac-K}
+\end{equation}
+
+实际中内点率未知，采用自适应策略：每次迭代后更新当前最优内点率$\hat{\varepsilon} = n_{\max}/N$，动态更新所需$K$。
+
+\subsubsection{退化情形与模型选择}
+
+当两图之间仅存在纯旋转（光心重合）时，单应退化为$\mat{H} = \mat{K}'\mat{R}\mat{K}\inv$（与\cref{eq:H21}一致，但$\mat{K},\mat{R}$未经标定）。此时所有特征匹配均满足同一单应，RANSAC收敛极快。
+
+当场景非平面且存在视差时，不存在单一的全局单应。此时RANSAC仅能对齐主导平面，其他区域的匹配将被标记为外点。后续\cref{sec:parallax}讨论对此的应对策略。
+
+% --------------------------------------------------
+\subsection{图像变形与投影}
+\label{sec:image-warping}
+
+\subsubsection{平面单应变形——后向映射}
+
+给定源图像$I_s$和目标图像$I_t$之间的单应$\mat{H}_{t \gets s}$，用后向映射（Backward Warping）将$I_s$变形到$I_t$的视点：
+
+\begin{resultbox}[后向映射+双线性插值]
+对目标图像$I_t$的每个像素$\vect{p}_t = (u_t,v_t)$：
+\[
+\begin{bmatrix}
+\tilde{u}_s \\ \tilde{v}_s \\ \tilde{w}_s
+\end{bmatrix}
+= \mat{H}_{t \gets s}\inv
+\begin{bmatrix}
+u_t \\ v_t \\ 1
+\end{bmatrix},
+\qquad
+u_s = \frac{\tilde{u}_s}{\tilde{w}_s},\;
+v_s = \frac{\tilde{v}_s}{\tilde{w}_s}
+\]
+\[
+I_t(u_t, v_t) = \text{Interp}_{\text{bilinear}}\bigl(I_s,\ u_s,\ v_s\bigr)
+\]
+\end{resultbox}
+
+\subsubsection{柱面/球面投影——消除广角透视畸变}
+
+对于水平大角度旋转拍摄的图像序列，直接将所有图像对齐到单一平面上会产生严重的透视畸变。柱面或球面投影是更合理的选择。
+
+\textbf{柱面投影。}设相机焦距为$f$（像素），将图像像素$(u,v)$映射到柱面坐标$(\theta, h)$：
+\begin{equation}
+\theta = \arctan\!\left(\frac{u - c_x}{f}\right),
+\qquad
+h = \frac{v - c_y}{\sqrt{(u-c_x)^2 + f^2}}
+\label{eq:cyl-proj}
+\end{equation}
+
+反向映射（柱面到像素）：
+\begin{equation}
+u = f\tan\theta + c_x,
+\qquad
+v = h\sqrt{f^2\tan^2\theta + f^2} + c_y
+\label{eq:cyl-inv}
+\end{equation}
+
+\textbf{焦距估计。}当相机内参未知时，可从匹配的单应矩阵中估计焦距。对于纯旋转情况，单应$\mat{H} = \mat{K}\mat{R}\mat{K}\inv$。利用$\mat{H}$的约束以及$\mat{K}$为对角矩阵（$s=0$），可推导出两个图之间的一致性约束方程，通过线性方法求解$f$。
+
+\subsubsection{全景图合成流程}
+
+\begin{enumerate}[leftmargin=*]
+  \item 将所有输入图像投影到柱面/球面坐标；
+  \item 估计各对相邻图像间的单应变换；
+  \item 将全部图像对齐到统一参考坐标系（通常为中间图像）；
+  \item 对重叠区域进行融合。
+\end{enumerate}
+
+% --------------------------------------------------
+\subsection{接缝优化与融合}
+\label{sec:seam-blending}
+
+即使几何对齐精确，直接拼接在重叠区域也会因光度差异和微小几何误差产生可见接缝。
+
+\subsubsection{增益补偿——全局光度对齐}
+
+不同图像间存在曝光差异。对每幅图像$i$估计一个全局增益因子$g_i$，最小化重叠区域的亮度差异：
+\begin{equation}
+\min_{\{g_i\}} \sum_{\text{重叠像素}(u,v)} \bigl(g_i I_i(u,v) - g_j I_j(u,v)\bigr)^2
+\label{eq:gain-comp}
+\end{equation}
+
+该问题为线性最小二乘，可通过求解正规方程得到闭合解。实际中常用对数域误差（乘法增益变加法偏移）以提高数值稳定性。
+
+\subsubsection{Graph-Cut最优接缝}
+
+当重叠区域存在视差（几幅图的对应点不严格对齐时），简单的加权融合会产生鬼影。最优接缝方法在重叠区域内寻找一条使差异最小的分割线：
+
+\begin{equation}
+E(\text{seam}) = \sum_{(u,v) \in \text{seam}} \Bigl(\|I_i(u,v) - I_j(u,v)\|_2^2
+                + \lambda \|\nabla I_i(u,v) - \nabla I_j(u,v)\|_2^2\Bigr)
+\label{eq:seam-energy}
+\end{equation}
+
+第一项为颜色差异，第二项为梯度差异（$\lambda$控制纹理一致性权重）。在像素网格上构建图（Graph），节点为像素，边权为相邻像素之间的差异能量，通过最小割（Min-Cut）算法求解最优接缝。
+
+\subsubsection{多频带融合——Laplacian金字塔}
+
+Burt与Adelson（1983）提出的多频带融合是消除接缝的金标准。核心理念是：\emph{低频分量}（大尺度亮度变化）在较宽过渡带中混合，\emph{高频分量}（纹理细节）在较窄过渡带中混合。
+
+\begin{resultbox}[Laplacian多频带融合]
+\textbf{步骤：}
+\begin{enumerate}[leftmargin=*]
+  \item 对每幅输入图像$I_i$构建$L$层Laplacian金字塔$\{\mathcal{L}_i^\ell\}_{\ell=0}^{L-1}$；
+  \item 构建对应的Gaussian权重金字塔$\{\mathcal{W}_i^\ell\}_{\ell=0}^{L-1}$（从重叠区域边界距离生成）；
+  \item 在每层$\ell$进行加权融合：
+  \[
+  \mathcal{L}_{\text{blend}}^\ell(u,v) =
+  \frac{\sum_i \mathcal{W}_i^\ell(u,v)\,\mathcal{L}_i^\ell(u,v)}{\sum_i \mathcal{W}_i^\ell(u,v)}
+  \]
+  \item 从融合后的Laplacian金字塔重构输出图像（自顶向下插值与叠加）。
+\end{enumerate}
+\end{resultbox}
+
+% --------------------------------------------------
+\subsection{多图拼接与全局优化}
+\label{sec:bundle-global}
+
+对于$N > 2$张图像的全景拼接，逐对拼接会导致累积误差。需要全局优化方法同时估计所有图像的变换参数。
+
+\subsubsection{Bundle Adjustment——全局几何优化}
+
+设图像$i$到参考坐标系的变换为$\vect{\Theta}_i$（对于单应拼接，$\vect{\Theta}_i = \mat{H}_i$；对于纯旋转拼接，$\vect{\Theta}_i = (\mat{R}_i, f)$）。全局Bundle Adjustment最小化所有匹配点对在各自图像上的重投影误差之和：
+\begin{equation}
+\min_{\{\vect{\Theta}_i\},\ \{\vect{X}_k\}}
+\sum_{i=1}^{N}\sum_{k \in \mathcal{V}_i}
+\Bigl\|\vect{p}_{ik}^{\text{(obs)}} - \pi\bigl(\vect{\Theta}_i,\ \vect{X}_k\bigr)\Bigr\|^2
+\label{eq:bundle-adjust}
+\end{equation}
+其中$\vect{X}_k$为三维场景点（对于平面场景为二维），$\mathcal{V}_i$为图像$i$中可见的匹配点集。
+
+\subsubsection{Brown与Lowe的自动全景流水线}
+
+Brown和Lowe（2007）提出的自动全景拼接完整管线已成为事实标准：
+
+\begin{enumerate}[leftmargin=*]
+  \item \textbf{特征提取：}对每幅图像提取SIFT特征点与描述子；
+  \item \textbf{图像匹配：}对所有图像对计算特征匹配数，用RANSAC估计单应，保留内点数足够多的图像对作为候选邻接关系；
+  \item \textbf{Bundle Adjustment：}以所有候选对的匹配点作为观测，全局优化相机参数（旋转角与焦距）。优化目标为：
+  \begin{equation}
+  \min_{\{f_i,\ \vect{R}_i\}} \sum_{(i,j)}\sum_{k} \|\vect{r}_{ij}^k\|^2
+  \label{eq:brown-ba}
+  \end{equation}
+  其中$\vect{r}_{ij}^k$为匹配点$k$从图像$i$投影到图像$j$后的残差向量；
+  \item \textbf{自动校直：}利用全局旋转估计使全景图的水平线保持水平（通过极线几何约束求解一个全局旋转校正）；
+  \item \textbf{合成：}用多频带融合生成最终全景图。
+\end{enumerate}
+
+\subsubsection{自动图片排序与连接图}
+
+对于无序图片集，需要自动发现图像之间的空间邻接关系。构建连接图（Connection Graph）$G = (V, E)$，节点$V$为图像，边$E$连接有足够多几何一致匹配的图像对。全景拼接等价于在$G$上找到一个全局一致的位姿分配。
+
+% --------------------------------------------------
+\subsection{视差处理：APAP与SPHP}
+\label{sec:parallax}
+
+当相机光心不重合且场景非平面时，不存在全局单应。此时传统单应拼接会产生严重鬼影。两类代表性方法：
+
+\subsubsection{APAP——尽可能投影的变形}
+
+Zaragoza等人（2013）提出的APAP（As-Projective-As-Possible）将图像划分为稠密网格，对每个网格单元独立估计一个局部单应，并通过Moving DLT方法对网格顶点进行平滑：
+
+\begin{equation}
+\mat{h}_* = \argmin_{\mat{h}} \sum_{i=1}^{N}
+w_i\,\bigl\|\vect{a}_i\trans\vect{h}\bigr\|^2,
+\quad
+w_i = \exp\!\bigl(-\|\vect{p}_* - \vect{p}_i\|^2 / \sigma^2\bigr)
+\label{eq:apap-weight}
+\end{equation}
+
+其中$\vect{p}_*$为网格顶点坐标，$w_i$为高斯核权重（距离$\vect{p}_*$越近的匹配点权重越大），$\vect{a}_i$为DLT方程矩阵的行。
+
+APAP的核心效果是：在特征点密集的区域，局部单应更接近投影变换（处理透视变化）；在稀疏区域，退化为仿射或相似变换（保持形状）。
+
+\subsubsection{SPHP——形状保持的半投影变形}
+
+Chang等人（2014）的SPHP（Shape-Preserving Half-Projective）在全景图的非重叠区域使用相似变换（保持形状、无透视畸变），在重叠区域使用投影变换（精确对齐），在两区域之间平滑过渡：
+
+\begin{equation}
+\mat{H}_{\text{SPHP}}(u,v) = \alpha(u,v)\,\mat{H}_{\text{proj}}
+                          + (1 - \alpha(u,v))\,\mat{H}_{\text{sim}}
+\label{eq:sphp}
+\end{equation}
+
+其中$\alpha(u,v) \in [0,1]$为空间变化的混合权重（在重叠中心为$1$，向非重叠区平滑减小至$0$），$\mat{H}_{\text{sim}}$为从$\mat{H}_{\text{proj}}$提取的最近相似变换。
+
+\begin{finalbox}
+特征匹配拼接中视差处理的三种策略：
+
+\begin{enumerate}[leftmargin=*]
+  \item \textbf{全局单应 + 最优接缝}（\cref{sec:seam-blending}）：对视差小的场景，通过Graph-Cut选择对齐最好的区域来隐藏鬼影；
+  \item \textbf{APAP局部单应}：对图像网格逐顶点估计加权单应，可处理中等程度视差，计算量中等；
+  \item \textbf{SPHP半投影}：对超大视场角拼接中远离重叠区域的形状畸变进行约束，结合投影与相似变换。
+\end{enumerate}
+\end{finalbox}
+
+% --------------------------------------------------
+\subsection{两种方法的统一视角与选择指南}
+\label{sec:comparison}
+
+\subsubsection{数学形式的统一}
+
+基于标定的LUT方法与基于特征匹配的方法在数学本质上并非对立：前者将变换参数固定为标定值（$\mat{H} = \mat{K}_2\mat{R}_{21}\mat{K}_1\inv$只计算一次），后者在线从图像数据中估计（$\mat{H} = \argmin_{\mat{H}} \sum_i \|\vect{p}_i' - \pi(\mat{H}\vect{p}_i)\|^2$每帧估计）。二者使用完全相同的单应投影模型——差别仅在于参数来源。
+
+当两相机为纯旋转关系时，特征匹配估计的单应\emph{应当收敛}到标定推导的$\mat{K}_2\mat{R}_{21}\mat{K}_1\inv$——这为两种方法提供了相互验证的机制。
+
+\subsubsection{选择决策表}
+
+\begin{center}
+\small
+\begin{tabular}{p{4cm}p{4.5cm}p{4.5cm}}
+\toprule
+\textbf{应用场景} & \textbf{推荐方法} & \textbf{理由} \\
+\midrule
+固定多相机阵列、实时拼接 & 预标定 + LUT & 运行时仅remap，延迟恒定 \\
+手持相机离线全景合成 & 特征匹配（Brown\&Lowe） & 无需标定，灵活 \\
+车载环视（已知外参） & 预标定 + 平面单应LUT & 低延迟，可嵌入 \\
+无人机航拍拼接 & 特征匹配 + 全局BA & 相机位姿不断变化 \\
+场景有显著深度变化 & APAP / SPHP & 全局单应失效 \\
+混合系统（标定+在线修正） & LUT基准 + 特征匹配在线微调 & 兼顾精度与鲁棒性 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsubsection{混合范式展望}
+
+两种范式正在走向融合。“半标定”方法利用粗略标定作为特征匹配的强先验（如已知$\mat{R}$的范围约束RANSAC的搜索空间），使匹配更快更鲁棒。同时，在线特征匹配可为LUT方案提供外参漂移的实时监测与修正——当LUT拼接出现明显鬼影时自动触发在线重标定。
+
+\begin{finalbox}
+特征匹配全景拼接的核心数学链：
+
+\[
+\boxed{
+\underbrace{\text{特征检测}}_{\text{SIFT / ORB}}
+\;\longrightarrow\;
+\underbrace{\text{特征匹配}}_{\text{Lowe比率检验}}
+\;\longrightarrow\;
+\underbrace{\text{RANSAC + DLT}}_{\text{单应估计}\ \mat{H}}
+\;\longrightarrow\;
+\underbrace{\text{后向映射 + 融合}}_{\text{多频带Blending}}
+}
+\]
+
+与LUT方法的本质联系：
+\[
+\boxed{
+\mat{H}_{\text{LUT}} = \mat{K}_2\mat{R}_{21}\mat{K}_1\inv
+\quad\longleftrightarrow\quad
+\mat{H}_{\text{feat}} = \argmin_{\mat{H}} \sum_i \|\vect{p}_i' - \pi(\mat{H}\vect{p}_i)\|^2
+}
+\]
+两者是同一单应模型的\emph{先验推导}与\emph{数据驱动}两种参数化方式。
+\end{finalbox}
