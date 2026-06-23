@@ -1,0 +1,125 @@
+% ============================================================
+% Chapter 4: 纯平移变换 + 光心不重合 + 平面场景
+% ============================================================
+\section{纯平移变换 + 光心不重合 + 平面场景}
+\label{sec:translate-only}
+
+\textbf{条件：}相机之间仅有平移关系（$\mat{R} = \mat{I}$），光心不重合（$\vect{T} \neq \vect{0}$），场景可近似为\emph{单一平面}（或已知深度）。
+
+\subsection{平面诱导单应——一般推导}
+\label{sec:plane-induced}
+
+\begin{definition}[平面诱导单应]
+设相机1坐标系下场景中存在平面$\Pi: \vect{n}\trans \vect{X}_1 = d$，其中$\vect{n} \in \real^3$为单位法向量（$\norm{\vect{n}}=1$），$d > 0$为相机1光心到平面$\Pi$的带符号距离。
+\end{definition}
+
+对平面上的任意三维点$\vect{X}_1$，其深度为：
+\begin{equation}
+\vect{n}\trans \vect{X}_1 = \vect{n}\trans(\lambda_1\,\mat{K}_1\inv\vect{p}_1) = d
+\quad\Longrightarrow\quad
+\lambda_1 = \frac{d}{\vect{n}\trans\mat{K}_1\inv\vect{p}_1}
+\label{eq:lambda-plane}
+\end{equation}
+
+将\eqref{eq:lambda-plane}代入一般映射方程\eqref{eq:general-pair-map}（令$\mat{R}_{21} = \mat{I}$）：
+\begin{align}
+\vect{p}_2 &\simto \mat{K}_2\Bigl(\mat{I}\cdot \frac{d}{\vect{n}\trans\mat{K}_1\inv\vect{p}_1}\mat{K}_1\inv\vect{p}_1 + \vect{T}_{21}\Bigr) \nonumber \\
+           &= \mat{K}_2\Bigl(\frac{d\,\mat{K}_1\inv\vect{p}_1 + \vect{T}_{21}\,\vect{n}\trans\mat{K}_1\inv\vect{p}_1}{\vect{n}\trans\mat{K}_1\inv\vect{p}_1}\Bigr) \nonumber \\
+           &= \mat{K}_2\Bigl(d\,\mat{I} + \vect{T}_{21}\,\vect{n}\trans\Bigr)\mat{K}_1\inv\vect{p}_1 \;\cdot\; \frac{1}{\vect{n}\trans\mat{K}_1\inv\vect{p}_1}
+\label{eq:plane-deriv}
+\end{align}
+
+注意分母$\vect{n}\trans\mat{K}_1\inv\vect{p}_1$为依赖于$\vect{p}_1$的标量。在齐次投影下，该标量被齐次等价关系吸收，因此：
+\begin{equation}
+\vect{p}_2 \simto \mat{K}_2\Bigl(\mat{I} + \frac{\vect{T}_{21}\,\vect{n}\trans}{d}\Bigr)\mat{K}_1\inv\,\vect{p}_1
+\label{eq:plane-homography-raw}
+\end{equation}
+
+\begin{theorem}[纯平移平面单应]
+在纯平移（$\mat{R}=\mat{I}$）、光心不重合、场景为平面$\Pi: \vect{n}\trans\vect{X}_1 = d$的条件下，相机1到相机2的像素映射由如下单应矩阵确定：
+\begin{equation}
+\mat{H}_{21}^{\Pi} = \mat{K}_2\Bigl(\mat{I} + \frac{\vect{T}_{21}\,\vect{n}\trans}{d}\Bigr)\mat{K}_1\inv
+\label{eq:H-plane-trans}
+\end{equation}
+该映射对平面$\Pi$上的点\emph{精确}成立；对偏离$\Pi$的点存在视差误差。
+\end{theorem}
+
+% --------------------------------------------------
+\subsection{双相机纯平移LUT}
+\label{sec:dual-trans}
+
+\begin{finalbox}
+双相机、纯平移、光心不重合、\emph{已知场景主导平面}$(\vect{n}, d)$、无畸变条件下，LUT由一个$3\times 3$平面诱导单应矩阵决定：
+\[
+\mat{H}_{21}^{\Pi} = \mat{K}_2\Bigl(\mat{I} + \frac{\vect{T}_{21}\,\vect{n}\trans}{d}\Bigr)\mat{K}_1\inv
+\]
+后向LUT查询（相机2目标像素到相机1源像素）：
+\[
+\vect{p}_1 \simto (\mat{H}_{21}^{\Pi})\inv\,\vect{p}_2
+      = \mat{K}_1\Bigl(\mat{I} + \frac{\vect{T}_{21}\,\vect{n}\trans}{d}\Bigr)\inv\mat{K}_2\inv\,\vect{p}_2
+\]
+利用Sherman--Morrison公式：
+\[
+\Bigl(\mat{I} + \frac{\vect{T}_{21}\,\vect{n}\trans}{d}\Bigr)\inv
+= \mat{I} - \frac{\vect{T}_{21}\,\vect{n}\trans}{d + \vect{n}\trans\vect{T}_{21}}
+\]
+\end{finalbox}
+
+\subsubsection{视差误差分析}
+
+对于不位于平面$\Pi$上的点$\vect{X}_1'$（设其深度为$\lambda_1' = \lambda_1 + \Delta\lambda$），使用$\mat{H}_{21}^{\Pi}$映射会产生像素误差：
+\begin{equation}
+\|\vect{p}_2^{\text{true}} - \vect{p}_2^{\Pi}\| \propto
+\frac{|\Delta\lambda|}{\lambda_1}\cdot\frac{\|\vect{T}_{21}\|}{d}
+\label{eq:parallax-error}
+\end{equation}
+
+当$\|\vect{T}_{21}\| \ll d$（基线远小于场景距离）或$\Delta\lambda \ll \lambda_1$（场景近似平面）时，误差可忽略。
+
+% --------------------------------------------------
+\subsection{多相机阵列纯平移LUT}
+\label{sec:multi-trans}
+
+当$N$个相机光心位于不同位置（$\vect{T}_{i0} \neq \vect{0},\; i=1,\dots,N-1$；设相机0为参考且$\vect{T}_{00}=\vect{0}$），且场景可近似为平面$\Pi: \vect{n}\trans\vect{X}_0 = d$时。
+
+每个相机$i$到参考相机0（或直接到全景坐标系）的平面诱导单应为：
+\begin{equation}
+\mat{H}_{i0}^{\Pi} = \mat{K}_i\Bigl(\mat{I} + \frac{\vect{T}_{i0}\,\vect{n}\trans}{d}\Bigr)\mat{K}_0\inv
+\label{eq:Hi0-plane}
+\end{equation}
+
+若以全景坐标系为目标，设全景相机参数为$(\mat{K}_p, \mat{R}_{p0})$，则相机$i$到全景的映射为：
+\begin{equation}
+\mat{H}_{ip}^{\Pi} = \mat{K}_p\,\mat{R}_{p0}
+\Bigl(\mat{I} + \frac{\vect{T}_{i0}\,\vect{n}\trans}{d}\Bigr)\mat{K}_i\inv
+\label{eq:Hip-plane}
+\end{equation}
+
+\begin{finalbox}
+多相机阵列、纯平移、光心不重合、已知主导平面$(\vect{n}, d)$、无畸变条件下，LUT为：
+\[
+\vect{p}_p \simto \mat{K}_p\,\mat{R}_{p0}\Bigl(\mat{I} + \frac{\vect{T}_{i0}\,\vect{n}\trans}{d}\Bigr)\mat{K}_i\inv\,\vect{p}_i
+\]
+其中$\vect{p}_p$为全景图像素齐次坐标。此映射对平面$\Pi$上的场景点精确，偏离平面时存在视差误差。
+\end{finalbox}
+
+\begin{remark}
+若各相机指向不同方向（即$\mat{R}_{i0} \neq \mat{I}$），则不属于“纯平移”情形；此时需使用\cref{sec:rt-general}的旋转+平移模型。
+\end{remark}
+
+% --------------------------------------------------
+\subsection{含畸变的情形}
+\label{sec:trans-distort}
+
+将畸变合并入纯平移LUT的方法与\cref{sec:one-step}完全一致：将$\mat{H}_{21}^{\Pi}$作用于像素坐标得到的无畸变对应点，再施加畸变映射$\mathcal{D}$，即得到直接从畸变源图采样的坐标。
+
+\begin{finalbox}
+纯平移 + 平面场景 + 含畸变的双相机一步法LUT：
+\[
+\vect{p}_2^{\text{(raw)}} =
+\mathcal{D}_{\text{pixel}}\Bigl(
+\mathcal{N}\bigl(\mat{H}_{21}^{\Pi}\,\vect{p}_1\bigr)
+\Bigr)
+\]
+其中$\mathcal{N}(\cdot)$表示齐次坐标归一化（除以第三分量），$\mathcal{D}_{\text{pixel}}$为像素域畸变施加算子（由内参$\mat{K}_2$与畸变映射$\mathcal{D}$复合）。
+\end{finalbox}

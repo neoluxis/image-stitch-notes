@@ -1,0 +1,164 @@
+% ============================================================
+% Chapter 5: 旋转+平移变换 + 光心不重合
+% ============================================================
+\section{旋转+平移变换 + 光心不重合}
+\label{sec:rt-general}
+
+\textbf{条件：}相机之间同时存在旋转$\mat{R}$与平移$\vect{T}$，光心不重合。这是最一般的双/多相机关系。此时方程\eqref{eq:general-pair-map}中的深度$\lambda_1$无法被齐次投影消去，\emph{不存在与深度无关的全局精确单应LUT}。本章讨论几种工程可行的近似方案与对应的LUT形式。
+
+% --------------------------------------------------
+\subsection{完整投影方程与LUT不可行性}
+\label{sec:rt-general-eq}
+
+回顾一般方程\eqref{eq:general-pair-map}：
+\begin{equation}
+\vect{p}_2 \simto \mat{K}_2\Bigl(\mat{R}_{21}\,\lambda_1\mat{K}_1\inv\vect{p}_1 + \vect{T}_{21}\Bigr)
+\label{eq:rt-full}
+\end{equation}
+
+将$\lambda_1\mat{K}_1\inv\vect{p}_1$视为从相机1出发的空间射线上的可变点$\vect{X}_1(\lambda_1)$，则$\vect{p}_2$随$\lambda_1$变化：
+\begin{equation}
+\vect{p}_2(\lambda_1) \simto
+\mat{K}_2\mat{R}_{21}\mat{K}_1\inv\vect{p}_1
+\;+\;
+\frac{1}{\lambda_1}\,\mat{K}_2\vect{T}_{21}
+\label{eq:rt-epipolar}
+\end{equation}
+
+当$\lambda_1 \to \infty$（无穷远点），$\vect{p}_2^\infty \simto \mat{K}_2\mat{R}_{21}\mat{K}_1\inv\vect{p}_1$（纯旋转单应）。
+当$\lambda_1$取有限值，$\vect{p}_2$沿极线方向偏离$\vect{p}_2^\infty$。
+
+\begin{theorem}[LUT不可行性]
+在$\vect{T}_{21} \neq \vect{0}$、场景深度未知且非单一平面时，不存在一个与深度无关的$3\times 3$单应矩阵$\mat{H}$使得对所有场景点满足$\vect{p}_2 \simto \mat{H}\vect{p}_1$。因此\emph{无法构建全局精确的固定2D LUT}。
+\end{theorem}
+
+以下三小节给出三种工程近似方案。
+
+% --------------------------------------------------
+\subsection{方案A：平面诱导单应LUT（已知主导平面）}
+\label{sec:rt-plane}
+
+若场景中存在一个主导平面$\Pi: \vect{n}\trans\vect{X}_1 = d$（如地面、远距离建筑立面），可使用推广的平面诱导单应。
+
+\begin{theorem}[一般平面诱导单应]
+相机1到相机2（含旋转$\mat{R}_{21}$和平移$\vect{T}_{21}$）的平面诱导单应为：
+\begin{equation}
+\mat{H}_{21}^{\Pi} = \mat{K}_2\Bigl(\mat{R}_{21} + \frac{\vect{T}_{21}\,\vect{n}\trans}{d}\Bigr)\mat{K}_1\inv
+\label{eq:H-plane-general}
+\end{equation}
+该矩阵对平面$\Pi$上的点精确成立。
+\end{theorem}
+
+\begin{proof}
+在平面约束$\vect{n}\trans\vect{X}_1 = d$下，$\lambda_1 = d/(\vect{n}\trans\mat{K}_1\inv\vect{p}_1)$。代入\eqref{eq:rt-full}：
+\begin{align*}
+\vect{p}_2 &\simto \mat{K}_2\Bigl(\mat{R}_{21}\frac{d}{\vect{n}\trans\mat{K}_1\inv\vect{p}_1}\mat{K}_1\inv\vect{p}_1 + \vect{T}_{21}\Bigr) \\
+           &= \mat{K}_2\Bigl(\mat{R}_{21}d\,\mat{K}_1\inv\vect{p}_1 + \vect{T}_{21}\,\vect{n}\trans\mat{K}_1\inv\vect{p}_1\Bigr)\frac{1}{\vect{n}\trans\mat{K}_1\inv\vect{p}_1} \\
+           &\simto \mat{K}_2\Bigl(\mat{R}_{21} + \frac{\vect{T}_{21}\,\vect{n}\trans}{d}\Bigr)\mat{K}_1\inv\vect{p}_1
+\end{align*}
+分母$\vect{n}\trans\mat{K}_1\inv\vect{p}_1$被齐次等价吸收。$\qed$
+\end{proof}
+
+\begin{finalbox}
+一般位姿（旋转+平移）+ 已知平面$(\vect{n}, d)$的LUT单应矩阵：
+\[
+\mat{H}_{21}^{\Pi} = \mat{K}_2\Bigl(\mat{R}_{21} + \frac{\vect{T}_{21}\,\vect{n}\trans}{d}\Bigr)\mat{K}_1\inv
+\]
+此矩阵融合了旋转与平面诱导的平移项，是\cref{eq:H21}与\eqref{eq:H-plane-trans}的统一推广。
+\end{finalbox}
+
+\begin{remark}
+当$d \to \infty$（平面在无穷远），$\mat{H}_{21}^{\Pi} \to \mat{K}_2\mat{R}_{21}\mat{K}_1\inv$，退化为纯旋转单应（\cref{sec:dual-rot}）。
+\end{remark}
+
+% --------------------------------------------------
+\subsection{方案B：远距离近似LUT}
+\label{sec:rt-distant}
+
+当场景距离远大于基线长度（$\lambda_{\min} \gg \|\vect{T}_{21}\|$）时，平移项$\vect{T}_{21}$对像素映射的贡献趋近于零。由\eqref{eq:rt-epipolar}可以直接得到：
+
+\begin{equation}
+\vect{p}_2(\lambda_1) \simto
+\mat{K}_2\mat{R}_{21}\mat{K}_1\inv\vect{p}_1 + \frac{1}{\lambda_1}\mat{K}_2\vect{T}_{21}
+\;\xrightarrow{\lambda_1 \to \infty}\;
+\mat{K}_2\mat{R}_{21}\mat{K}_1\inv\vect{p}_1
+\end{equation}
+
+\begin{proposition}[远距离近似条件及其LUT]
+若$\frac{\|\vect{T}_{21}\|}{\lambda_{\min}} \le \varepsilon$（$\varepsilon$为可接受的相对误差，典型取值$0.01 \sim 0.05$），则双相机LUT可由如下单应矩阵近似：
+\begin{equation}
+\mat{H}_{21}^{\text{distant}} = \mat{K}_2\,\mat{R}_{21}\,\mat{K}_1\inv
+\label{eq:distant-approx}
+\end{equation}
+近似像素误差约为$\varepsilon \cdot f$（$f$为焦距像素值）。该矩阵形式上与纯旋转单应\cref{eq:H21}相同，但$\mat{R}_{21}$为实际外参旋转分量——本质是通过忽略平移项将一般位姿\emph{降级}为纯旋转模型。近距离目标上此近似会产生可察觉的视差伪影。
+\end{proposition}
+
+% --------------------------------------------------
+\subsection{方案C：多相机阵列统一LUT框架}
+\label{sec:rt-multi}
+
+对于多相机刚性阵列（如车载环视系统），各相机位姿$(\mat{R}_{i0}, \vect{T}_{i0})$相对于参考坐标系（通常取阵列几何中心）已知。根据场景特征选择映射策略：
+
+\subsubsection{C1. 远距离全景}
+
+若所有目标距离远大于阵列尺寸，对每个相机$i$采用远距离近似：
+\begin{equation}
+\vect{p}_i \approx \mat{K}_i\,\mat{R}_{iw}\,\vect{d}_w
+\label{eq:multi-distant}
+\end{equation}
+与\cref{sec:multi-rot}的多相机纯旋转LUT完全相同。
+
+\subsubsection{C2. 地平面假设（Ground Plane）}
+
+设地面为平面$\Pi_g: \vect{n}_g\trans\vect{X}_0 = h$（$h$为参考相机高度），对每个相机$i$构建平面诱导单应到鸟瞰图或全景：
+\begin{equation}
+\mat{H}_{ip}^{\Pi_g} = \mat{K}_p\,\mat{R}_{p0}\Bigl(\mat{R}_{i0} + \frac{\vect{T}_{i0}\,\vect{n}_g\trans}{h}\Bigr)\mat{K}_i\inv
+\label{eq:multi-ground}
+\end{equation}
+
+\subsubsection{C3. 混合策略}
+
+对场景中的不同深度层使用不同的LUT表（多表切换），或使用深度传感器（LiDAR/双目）获取逐像素深度后动态计算：
+\begin{equation}
+\vect{p}_i(u_p,v_p) \simto
+\mat{K}_i\Bigl(\mat{R}_{iw}\,\vect{d}_w + \frac{\vect{T}_{i0}}{\lambda(u_p,v_p)}\Bigr)
+\label{eq:multi-depth}
+\end{equation}
+其中$\lambda(u_p,v_p)$为全景像素$(u_p,v_p)$对应的场景深度（需从深度传感器或深度估计算法获取）。此时LUT退化为\emph{深度参数化的动态映射}，不再是简单二维查表。
+
+\begin{finalbox}
+旋转+平移、光心不重合、多相机阵列的统一LUT框架（无畸变）：
+
+\begin{enumerate}[leftmargin=*, label=(\arabic*)]
+  \item 远距离近似：
+  \[
+  \vect{p}_i \simto \mat{K}_i\,\mat{R}_{iw}\,\vect{d}_w(\theta,\phi)
+  \]
+  \item 地平面假设（平面$(\vect{n}_g, h)$）：
+  \[
+  \vect{p}_i \simto \mat{K}_i\Bigl(\mat{R}_{iw} + \frac{\vect{T}_{i0}\,\vect{n}_g\trans}{h}\Bigr)\mat{K}_p\inv\,\vect{p}_p
+  \]
+  （等价于为每个相机独立构建到全景的平面诱导单应）
+  \item 含深度的精确映射（非固定LUT）：
+  \[
+  \vect{p}_i \simto \mat{K}_i\Bigl(\mat{R}_{iw}\,\vect{d}_w + \frac{\vect{T}_{i0}}{\lambda}\Bigr)
+  \]
+\end{enumerate}
+\end{finalbox}
+
+% --------------------------------------------------
+\subsection{含畸变的推广}
+\label{sec:rt-distort}
+
+对以上任一方案，畸变合并方式与\cref{sec:one-step}一致：在LUT预计算时将$\mathcal{D}$施加于最终像素坐标。以平面诱导单应为例：
+
+\begin{finalbox}
+旋转+平移 + 平面假设 $(\vect{n}, d)$ + 含畸变的一步法LUT：
+\[
+\vect{p}_2^{\text{(raw)}} =
+\mathcal{N}_{\text{distort}}^{(2)}\Bigl(
+\mat{H}_{21}^{\Pi}\,\vect{p}_1
+\Bigr)
+\]
+其中$\mathcal{N}_{\text{distort}}^{(2)}(\tilde{\vect{p}}) = \mat{K}_2 \circ \mathcal{D} \circ \pi^{-1}(\tilde{\vect{p}})$为相机2的完整像素映射算子（归一化→畸变→像素）。
+\end{finalbox}

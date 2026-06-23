@@ -1,0 +1,215 @@
+% ============================================================
+% Chapter 1: 基础模型与符号约定
+% ============================================================
+\section{基础模型与符号约定}
+\label{sec:fundamentals}
+
+本章建立全文所需的数学模型、坐标系定义与符号体系，作为后续各章推导的共同基础。
+
+% --------------------------------------------------
+\subsection{针孔相机模型}
+\label{sec:pinhole}
+
+考虑第$i$个相机（$i = 0,1,\dots,N-1$），采用标准针孔投影模型。
+
+\begin{definition}[内参矩阵]
+相机$i$的内参矩阵$\mat{K}_i \in \real^{3\times 3}$定义为：
+\begin{equation}
+\mat{K}_i =
+\begin{bmatrix}
+f_{x,i} & 0      & c_{x,i} \\
+0       & f_{y,i} & c_{y,i} \\
+0       & 0       & 1
+\end{bmatrix}
+\label{eq:Ki}
+\end{equation}
+其中$f_{x,i}, f_{y,i}$为$x,y$方向焦距（像素单位），$(c_{x,i}, c_{y,i})$为主点像素坐标。
+\end{definition}
+
+\begin{definition}[像素齐次坐标]
+图像像素点$\vect{p}_i = (u_i, v_i)$的齐次坐标表示为：
+\begin{equation}
+\vect{p}_i \triangleq
+\begin{bmatrix}
+u_i \\ v_i \\ 1
+\end{bmatrix} \in \proj^2
+\label{eq:pi}
+\end{equation}
+\end{definition}
+
+\begin{definition}[归一化方向向量]
+将像素坐标反投影到相机归一化平面，得到方向向量$\vect{d}_i$：
+\begin{equation}
+\vect{d}_i  = \mat{K}_i\inv \vect{p}_i  =
+\begin{bmatrix}
+x_i \\ y_i \\ 1
+\end{bmatrix},
+\qquad
+x_i = \frac{u_i - c_{x,i}}{f_{x,i}},\quad
+y_i = \frac{v_i - c_{y,i}}{f_{y,i}}
+\label{eq:di}
+\end{equation}
+$\vect{d}_i$表示从相机光心指向像素$\vect{p}_i$对应的空间方向（三维齐次方向矢量）。
+\end{definition}
+
+三维空间点$\vect{X}_i = (X_i, Y_i, Z_i)\trans$在相机$i$坐标系下的投影关系为：
+\begin{equation}
+\vect{p}_i \simto \mat{K}_i \vect{X}_i,
+\qquad
+\vect{X}_i = \lambda_i \vect{d}_i = \lambda_i \mat{K}_i\inv \vect{p}_i
+\label{eq:projection}
+\end{equation}
+其中$\lambda_i = Z_i > 0$为该点的深度（沿光轴方向的坐标）。符号$\simto$表示齐次等价（相差一个非零尺度因子）。
+
+% --------------------------------------------------
+\subsection{畸变模型}
+\label{sec:distortion}
+
+真实相机存在镜头畸变。设$\vect{d}_i^{\text{(raw)}} = [x_d, y_d, 1]\trans$为从畸变图像坐标归一化后得到的有畸变方向向量，$\vect{d}_i = [x_u, y_u, 1]\trans$为去畸变后的理想方向向量。
+
+\begin{definition}[径向+切向畸变模型（Brown--Conrady）]
+令$r^2 = x_d^2 + y_d^2$。去畸变映射$\mathcal{U}: (x_d, y_d) \mapsto (x_u, y_u)$为：
+\begin{align}
+x_u &= x_d\bigl(1 + k_1 r^2 + k_2 r^4 + k_3 r^6\bigr)
+      + 2p_1 x_d y_d + p_2(r^2 + 2x_d^2) \label{eq:undistort-x} \\
+y_u &= y_d\bigl(1 + k_1 r^2 + k_2 r^4 + k_3 r^6\bigr)
+      + p_1(r^2 + 2y_d^2) + 2p_2 x_d y_d \label{eq:undistort-y}
+\end{align}
+其中$\{k_1,k_2,k_3\}$为径向畸变系数，$\{p_1,p_2\}$为切向畸变系数。
+\end{definition}
+
+畸变施加映射（从无畸变到有畸变）记为$\mathcal{D} = \mathcal{U}\inv$，通常通过迭代（Newton法）或近似解析逆求解。对于LUT预计算而言，可使用任意精度方法离线求解，不影响运行时性能。
+
+\begin{definition}[含畸变的完整投影链]
+从三维空间方向到畸变图像像素的完整映射为：
+\begin{equation}
+\vect{p}_i^{\text{(raw)}} \simto \mat{K}_i \cdot \mathcal{D}\bigl(\vect{d}_i\bigr)
+\label{eq:full-proj-dist}
+\end{equation}
+其中$\vect{d}_i$为无畸变方向向量，$\mathcal{D}(\cdot)$将$[x_u,y_u,1]\trans$映射为$[x_d,y_d,1]\trans$（仅作用于前两个分量，第三分量恒为1），$\mat{K}_i$将去畸变归一化坐标映射为像素坐标（注意：实际像素在畸变图像上，严格写法应为$\vect{p}_i^{\text{(raw)}} = [f_x x_d + c_x,\; f_y y_d + c_y,\; 1]\trans$）。
+\end{definition}
+
+\medskip
+\noindent\textbf{关于畸变在LUT中的处理方式}，后文将在\cref{sec:rotate-distort}中详述两种方案：
+\begin{enumerate}[label=(\arabic*)]
+  \item 畸变分离式LUT：LUT仅存储无畸变坐标，运行时先对源图做去畸变再查表；
+  \item 畸变合并式LUT：将畸变映射直接编码进LUT，运行时从畸变原图直接采样。
+\end{enumerate}
+
+% --------------------------------------------------
+\subsection{双相机外参模型}
+\label{sec:extrinsic-pair}
+
+\begin{definition}[双相机外参]
+设相机1和相机2之间的刚体变换为：
+\begin{equation}
+\vect{X}_2 = \mat{R}_{21} \vect{X}_1 + \vect{T}_{21}
+\label{eq:extrinsic21}
+\end{equation}
+其中$\mat{R}_{21} \in SO(3)$为旋转矩阵，$\vect{T}_{21} \in \real^3$为平移向量。$\vect{X}_1$、$\vect{X}_2$分别表示同一三维点在相机1和相机2坐标系下的坐标。
+\end{definition}
+
+将投影公式$\vect{X}_1 = \lambda_1 \mat{K}_1\inv \vect{p}_1$代入\eqref{eq:extrinsic21}，两端左乘$\mat{K}_2$并利用$\vect{p}_2 \simto \mat{K}_2 \vect{X}_2$，得到两相机像素间的一般映射关系：
+\begin{equation}
+\vect{p}_2 \simto \mat{K}_2\Bigl(\mat{R}_{21}\,\lambda_1 \mat{K}_1\inv \vect{p}_1 + \vect{T}_{21}\Bigr)
+\label{eq:general-pair-map}
+\end{equation}
+
+方程\eqref{eq:general-pair-map}是全文所有推导的出发点。它包含未知深度$\lambda_1$，一般情况下\emph{不能}写为与$\lambda_1$无关的单应矩阵。
+
+% --------------------------------------------------
+\subsection{全景坐标系定义}
+\label{sec:pano-coords}
+
+对于多相机全景拼接，需定义统一的全景图像坐标系。
+
+\begin{definition}[球面经纬图（Equirectangular Projection）]
+设全景图像宽$W$、高$H$，像素$(u_p, v_p)$对应球面经纬角$(\theta, \phi)$（方位角与仰角）：
+\begin{equation}
+\theta = \frac{u_p - c_{x,p}}{f_p},
+\qquad
+\phi   = \frac{v_p - c_{y,p}}{f_p}
+\label{eq:pano-pixel-to-angle}
+\end{equation}
+其中$f_p = W / (2\pi)$为全景焦距（像素/弧度），$c_{x,p}=W/2,\;c_{y,p}=H/2$为全景主点。反之：
+\begin{equation}
+u_p = f_p \theta + c_{x,p},
+\qquad
+v_p = f_p \phi   + c_{y,p}
+\label{eq:angle-to-pano-pixel}
+\end{equation}
+\end{definition}
+
+\begin{definition}[全景坐标系下的单位方向向量]
+经纬角$(\theta, \phi)$对应的世界（全景）坐标系下的单位方向向量为：
+\begin{equation}
+\vect{d}_w(\theta, \phi) =
+\begin{bmatrix}
+\cos\phi \sin\theta \\
+\sin\phi \\
+\cos\phi \cos\theta
+\end{bmatrix}
+\in \mathbb{S}^2
+\label{eq:dw}
+\end{equation}
+此定义的几何意义为：全景坐标系的$+z$轴指向正前方（$\theta=0,\phi=0$），$+x$轴指向右侧，$+y$轴指向上方。$\vect{d}_w$是模长为$1$的单位向量。
+\end{definition}
+
+\begin{remark}
+也可采用柱面投影（Cylindrical Projection），将$\vect{d}_w$替换为：
+\begin{equation}
+\vect{d}_w^{\text{(cyl)}}(\theta, h) =
+\begin{bmatrix}
+\sin\theta \\ h \\ \cos\theta
+\end{bmatrix}
+\label{eq:dw-cyl}
+\end{equation}
+其中$h$为归一化高度。后续推导以球面投影为主，柱面投影可通过替换$\vect{d}_w$直接类推。
+\end{remark}
+
+% --------------------------------------------------
+\subsection{世界坐标系与相机坐标系之间的旋转}
+\label{sec:world-cam-rot}
+
+\begin{definition}[世界到相机的旋转]
+设相机$i$的外参旋转矩阵为$\mat{R}_{wi} \in SO(3)$，表示\emph{相机坐标系到世界坐标系}的旋转：
+\begin{equation}
+\vect{d}_w = \mat{R}_{wi}\,\vect{d}_i
+\quad\Longleftrightarrow\quad
+\vect{d}_i = \mat{R}_{wi}\inv\,\vect{d}_w \triangleq \mat{R}_{iw}\,\vect{d}_w
+\label{eq:world-cam-rot}
+\end{equation}
+其中$\mat{R}_{iw} = \mat{R}_{wi}\inv = \mat{R}_{wi}\trans$为世界到相机$i$的旋转矩阵。
+\end{definition}
+
+若将相机$0$选为参考相机，则$\mat{R}_{w0} = \mat{I}$（即全景坐标系与世界坐标系对齐），此时$\mat{R}_{i0} = \mat{R}_{wi}\inv \mat{R}_{w0} = \mat{R}_{iw}$。
+
+% --------------------------------------------------
+\subsection{LUT查表法基本框架}
+\label{sec:lut-framework}
+
+本文讨论的“查表法”指以下范式：
+
+\begin{enumerate}[label=(\arabic*)]
+  \item \textbf{离线预计算阶段}：利用已知的相机标定参数$(\mat{K}_i,\; \mat{R}_{iw},\; \text{畸变系数})$与选定的全景投影模型，对全景图像的每个像素$(u_p, v_p)$，计算应当从哪个源相机$i$的哪个像素$(u_i, v_i)$采样；
+  \item \textbf{在线查表阶段}：对每帧输入图像，直接用预计算的映射表$\text{map}_x^{(i)}(u_p, v_p),\; \text{map}_y^{(i)}(u_p, v_p)$从源图像$\vect{I}_i$采样填充全景图$\vect{P}$。
+\end{enumerate}
+
+\begin{definition}[LUT映射表]
+对相机$i$的LUT定义为两个与全景图同尺寸的浮点数组：
+\begin{equation}
+\text{map}_x^{(i)}(u_p, v_p) = u_i,\qquad
+\text{map}_y^{(i)}(u_p, v_p) = v_i
+\label{eq:lut-def}
+\end{equation}
+若某全景像素$(u_p, v_p)$不在相机$i$的视野内，则对应LUT条目标记为无效值（如$-1$或$\text{NaN}$）。
+
+运行时全景拼接为：
+\begin{equation}
+\vect{P}(u_p, v_p) = \vect{I}_i\Bigl(\text{map}_x^{(i)}(u_p, v_p),\; \text{map}_y^{(i)}(u_p, v_p)\Bigr),
+\quad\text{取有效相机$i$}
+\label{eq:lut-runtime}
+\end{equation}
+\end{definition}
+
+本文的核心目标即为：\textbf{针对不同几何条件，给出从$(u_p, v_p)$到$(u_i, v_i)$的最终计算公式——即LUT的内容}。

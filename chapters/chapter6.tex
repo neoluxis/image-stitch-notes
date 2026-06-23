@@ -1,0 +1,180 @@
+% ============================================================
+% Chapter 6: 统一LUT公式总览表
+% ============================================================
+\section{统一LUT公式总览表}
+\label{sec:summary}
+
+本章以表格形式汇总前述所有情形下的最终LUT公式，便于工程查阅与实现。
+
+\subsection{符号速查}
+\label{sec:notation-summary}
+
+\begin{tabularx}{\textwidth}{lX}
+\toprule
+符号 & 含义 \\
+\midrule
+$\mat{K}_i$ & 相机$i$的内参矩阵（$3\times 3$上三角） \\
+$\mat{R}_{ij}$ & 相机$i$到相机$j$的旋转矩阵（$SO(3)$） \\
+$\vect{T}_{ij}$ & 相机$i$到相机$j$的平移向量（$\real^3$） \\
+$\mat{R}_{iw}$ & 世界坐标系到相机$i$的旋转矩阵 \\
+$\vect{d}_w(\theta,\phi)$ & 球面方向向量，$\vect{d}_w = [\cos\phi\sin\theta,\; \sin\phi,\; \cos\phi\cos\theta]\trans$ \\
+$(\theta,\phi)$ & 全景经纬角，$\theta = (u_p-c_{x,p})/f_p,\; \phi = (v_p-c_{y,p})/f_p$ \\
+$\vect{p}_i = [u_i,v_i,1]\trans$ & 相机$i$图像像素齐次坐标 \\
+$\vect{p}_i^{\text{(raw)}}$ & 畸变图像（原始）像素齐次坐标 \\
+$\mathcal{D}$ & 畸变施加映射：$(x_u,y_u) \mapsto (x_d,y_d)$ \\
+$\mathcal{U}$ & 去畸变映射：$(x_d,y_d) \mapsto (x_u,y_u)$，$\mathcal{U} = \mathcal{D}\inv$ \\
+$\vect{n}$ & 平面单位法向量（$\norm{\vect{n}}=1$） \\
+$d$ & 相机光心到平面的带符号距离（$d>0$） \\
+$\lambda_i$ & 相机$i$坐标系下的点深度 \\
+$\simto$ & 齐次坐标等价（相差非零尺度因子） \\
+\bottomrule
+\end{tabularx}
+
+\subsection{双相机LUT公式汇总}
+\label{sec:summary-dual}
+
+表~\ref{tab:summary-dual} 按变换方式、光心是否重合、有无畸变三个维度列出双相机情形下的全部LUT公式，可直接作为工程实现的公式速查卡。
+
+\begin{table}[H]
+\centering
+\caption{双相机LUT变换矩阵/公式汇总}
+\label{tab:summary-dual}
+\small
+\begin{tabularx}{\textwidth}{p{2.0cm}p{2.8cm}p{2.0cm}X}
+\toprule
+\textbf{变换方式} & \textbf{光心} & \textbf{畸变} & \textbf{最终LUT公式} \\
+\midrule
+纯旋转
+  & 重合
+  & 无
+  & $\mat{H}_{21} = \mat{K}_2\mat{R}_{21}\mat{K}_1\inv$ \quad（精确）\\[4pt]
+
+纯旋转
+  & 重合
+  & 有
+  & $\vect{p}_2^{\text{(raw)}} = \mathcal{N}_{\text{distort}}^{(2)}\bigl(\mat{K}_2\mat{R}_{21}\mat{K}_1\inv\vect{p}_1\bigr)$ \quad（精确）\\[4pt]
+
+纯平移
+  & 不重合
+  & 无
+  & $\mat{H}_{21}^{\Pi} = \mat{K}_2\bigl(\mat{I} + \frac{\vect{T}_{21}\vect{n}\trans}{d}\bigr)\mat{K}_1\inv$ \quad（平面精确，否则近似）\\[4pt]
+
+纯平移
+  & 不重合
+  & 有
+  & $\vect{p}_2^{\text{(raw)}} = \mathcal{N}_{\text{distort}}^{(2)}\bigl(\mat{H}_{21}^{\Pi}\,\vect{p}_1\bigr)$ \quad（同上）\\[4pt]
+
+旋转+平移
+  & 不重合
+  & 无
+  & $\mat{H}_{21}^{\Pi} = \mat{K}_2\bigl(\mat{R}_{21} + \frac{\vect{T}_{21}\vect{n}\trans}{d}\bigr)\mat{K}_1\inv$ \quad（平面精确）\\[4pt]
+  & & & 或 $\mat{H}_{21}^{\text{distant}} = \mat{K}_2\mat{R}_{21}\mat{K}_1\inv$ \quad（远距离近似）\\[4pt]
+
+旋转+平移
+  & 不重合
+  & 有
+  & $\vect{p}_2^{\text{(raw)}} = \mathcal{N}_{\text{distort}}^{(2)}\bigl(\mat{H}_{21}^{\Pi}\,\vect{p}_1\bigr)$ \quad（平面精确）
+  或远距离近似畸变合并版本 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{多相机阵列LUT公式汇总}
+\label{sec:summary-multi}
+
+表~\ref{tab:summary-multi} 列出多相机阵列在球面全景投影下的各情形LUT公式。与双相机不同，多相机LUT的核心是全景像素$(u_p,v_p)$到各相机$i$的逐像素映射关系。
+
+\begin{table}[H]
+\centering
+\caption{多相机阵列LUT变换公式汇总（球面全景投影）}
+\label{tab:summary-multi}
+\small
+\begin{tabularx}{\textwidth}{p{2.0cm}p{2.8cm}p{2.0cm}X}
+\toprule
+\textbf{变换方式} & \textbf{光心} & \textbf{畸变} & \textbf{最终LUT公式（全景像素$(u_p,v_p)$到相机$i$）} \\
+\midrule
+纯旋转
+  & 重合
+  & 无
+  & $\vect{p}_i \simto \mat{K}_i\,\mat{R}_{iw}\,\vect{d}_w(\theta,\phi)$ \quad（精确）\\[6pt]
+
+纯旋转
+  & 重合
+  & 有
+  & $\vect{p}_i^{\text{(raw)}} = \mathcal{N}_{\text{distort}}^{(i)}\bigl(\mat{R}_{iw}\,\vect{d}_w(\theta,\phi)\bigr)$ \quad（精确）\\[6pt]
+
+纯平移
+  & 不重合
+  & 无
+  & $\vect{p}_p \simto \mat{K}_p\,\mat{R}_{p0}\bigl(\mat{I} + \frac{\vect{T}_{i0}\vect{n}\trans}{d}\bigr)\mat{K}_i\inv\,\vect{p}_i$ \quad（反查：全景到相机$i$）\\[6pt]
+
+纯平移
+  & 不重合
+  & 有
+  & $\vect{p}_i^{\text{(raw)}} = \mathcal{N}_{\text{distort}}^{(i)}\bigl((\mat{H}_{pi}^{\Pi})\inv\,\vect{p}_p\bigr)$ \quad（同上）\\[6pt]
+
+旋转+平移
+  & 不重合
+  & 无
+  & $\vect{p}_i \simto \mat{K}_i\bigl(\mat{R}_{iw}\,\vect{d}_w(\theta,\phi) + \frac{\vect{T}_{i0}}{\lambda}\bigr)$ \quad（需深度）\\[6pt]
+  & & & 远距离近似：$\vect{p}_i \simto \mat{K}_i\,\mat{R}_{iw}\,\vect{d}_w(\theta,\phi)$\\[6pt]
+  & & & 地平面假设：$\vect{p}_i \simto \mat{K}_i\bigl(\mat{R}_{iw} + \frac{\vect{T}_{i0}\vect{n}_g\trans}{h}\bigr)\mat{K}_p\inv\,\vect{p}_p$\\[6pt]
+
+旋转+平移
+  & 不重合
+  & 有
+  & 在上述对应无畸变公式的最终像素坐标上施加$\mathcal{D}$即可得到畸变合并LUT \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{各情形适用条件与精度}
+\label{sec:applicability}
+
+表~\ref{tab:precision} 总结各几何条件下LUT的精度性质与误差来源，用于指导实际部署中根据场景特征选择最合适的LUT策略。
+
+\begin{table}[H]
+\centering
+\caption{各几何条件下的LUT精度与适用范围}
+\label{tab:precision}
+\begin{tabularx}{\textwidth}{p{2.8cm}p{2.8cm}Xp{2.5cm}}
+\toprule
+\textbf{条件} & \textbf{LUT性质} & \textbf{误差来源} & \textbf{适用范围} \\
+\midrule
+纯旋转 + 光心重合
+  & 全局精确，与深度无关
+  & 标定误差
+  & 旋转云台、光心重合的刚性连接 \\
+
+纯旋转 + 光心不重合\newline（实际制造公差）
+  & 存在视差误差
+  & $\propto \|\vect{T}\|/\lambda$
+  & $\|\vect{T}\| \ll \lambda_{\min}$时可用 \\
+
+纯平移 + 平面场景
+  & 对平面精确，偏离平面有误差
+  & 场景非平面性
+  & 地面/建筑立面等近似平面 \\
+
+纯平移 + 一般场景
+  & 无全局单应
+  & 深度变化引起视差
+  & 需含深度映射或接受误差 \\
+
+旋转+平移 + 远距离
+  & 纯旋转近似
+  & $\propto \|\vect{T}\|/\lambda_{\min}$
+  & $\lambda_{\min} > 100\|\vect{T}\|$时视觉上可接受 \\
+
+旋转+平移 + 平面假设
+  & 对平面精确
+  & 场景非平面性
+  & 可分割多平面分别构建LUT \\
+
+旋转+平移 + 已知深度
+  & 逐像素精确
+  & 深度测量误差
+  & 配合LiDAR/深度相机使用 \\
+\bottomrule
+\end{tabularx}
+\end{table}

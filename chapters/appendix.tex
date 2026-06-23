@@ -1,0 +1,145 @@
+% ============================================================
+% Appendix: 补充推导、工程实现细节与符号表
+% ============================================================
+\section{平面诱导单应的Sherman--Morrison化简}
+\label{apx:sherman-morrison}
+
+平面诱导单应中的核心矩阵$\mat{A} = \mat{I} + \vect{t}\,\vect{n}\trans/d$（其中$\vect{t} = \vect{T}_{21}$）的逆矩阵可利用Sherman--Morrison公式化简：
+
+\begin{equation}
+\mat{A}\inv = \Bigl(\mat{I} + \frac{\vect{t}\,\vect{n}\trans}{d}\Bigr)\inv
+            = \mat{I} - \frac{\vect{t}\,\vect{n}\trans}{d + \vect{n}\trans\vect{t}}
+\label{eq:sherman}
+\end{equation}
+
+推广到含旋转的矩阵$\mat{B} = \mat{R} + \vect{t}\,\vect{n}\trans/d$：
+\begin{equation}
+\mat{B} = \mat{R}\Bigl(\mat{I} + \frac{\mat{R}\trans\vect{t}\,\vect{n}\trans}{d}\Bigr)
+        \;\Longrightarrow\;
+\mat{B}\inv = \Bigl(\mat{I} - \frac{\mat{R}\trans\vect{t}\,\vect{n}\trans}{d + \vect{n}\trans\mat{R}\trans\vect{t}}\Bigr)\mat{R}\trans
+\label{eq:sherman-rt}
+\end{equation}
+
+这在计算后向LUT时可直接使用，无需数值求逆。
+
+\section{LUT预计算的数值精度考虑}
+\label{apx:precision}
+
+\begin{enumerate}[leftmargin=*]
+  \item \textbf{浮点精度}：LUT应使用\texttt{float32}存储。对于$4\text{K}\times 2\text{K}$的全景图，每个相机的LUT约$2 \times 4000 \times 2000 \times 4 = 64\,\text{MB}$。多相机时内存需求线性增长，可通过下采样LUT + 运行时插值来折中。
+  \item \textbf{边界处理}：超出图像范围的LUT条目应标记为无效值（建议$-\text{NaN}$或$-1$），运行时通过\texttt{cv::remap}的边界模式或手动检查跳过。
+  \item \textbf{畸变迭代收敛判据}：Newton迭代以$\|\mathcal{U}(x_d^{(k)}, y_d^{(k)}) - (x_u, y_u)\| < 10^{-6}$为收敛标准（对应亚像素精度）。
+  \item \textbf{球面投影的极点奇异性}：在$\phi \to \pm\pi/2$（天顶/天底），$\cos\phi \to 0$使得方向向量退化为$[0, \pm 1, 0]\trans$。此时方位角$\theta$失去意义，LUT中该区域所有$\theta$值应映射到同一像素。
+\end{enumerate}
+
+\section{工程实现伪代码}
+\label{apx:pseudocode}
+
+以下给出球面全景多相机LUT生成的完整伪代码（无畸变情形）：
+
+\begin{verbatim}
+def build_lut(K_list, R_iw_list, image_sizes, pano_size):
+    """
+    构建多相机球面全景LUT。
+
+    参数:
+      K_list:       list of 3x3 内参矩阵 (每相机)
+      R_iw_list:    list of 3x3 世界→相机旋转矩阵
+      image_sizes:  list of (W, H) 每相机图像尺寸
+      pano_size:    (W_p, H_p) 全景图尺寸
+
+    返回:
+      maps: list of (map_x, map_y, mask) 每相机LUT
+    """
+    W_p, H_p = pano_size
+    f_p = W_p / (2 * pi)
+    c_xp, c_yp = W_p / 2, H_p / 2
+
+    maps = []
+    for K, R_iw, (W_i, H_i) in zip(K_list, R_iw_list, image_sizes):
+        map_x = np.full((H_p, W_p), np.nan, dtype=np.float32)
+        map_y = np.full((H_p, W_p), np.nan, dtype=np.float32)
+
+        for v_p in range(H_p):
+            phi = (v_p - c_yp) / f_p
+            cos_phi, sin_phi = cos(phi), sin(phi)
+
+            for u_p in range(W_p):
+                theta = (u_p - c_xp) / f_p
+
+                # 球面方向向量
+                d_w = np.array([
+                    cos_phi * sin(theta),
+                    sin_phi,
+                    cos_phi * cos(theta)
+                ])
+
+                # 转换到相机坐标系
+                d_i = R_iw @ d_w
+
+                # 检查方向是否朝前 (z > 0)
+                if d_i[2] <= 0:
+                    continue
+
+                # 投影到像素
+                u_i = K[0,0] * d_i[0] / d_i[2] + K[0,2]
+                v_i = K[1,1] * d_i[1] / d_i[2] + K[1,2]
+
+                if 0 <= u_i < W_i and 0 <= v_i < H_i:
+                    map_x[v_p, u_p] = u_i
+                    map_y[v_p, u_p] = v_i
+
+        maps.append((map_x, map_y))
+    return maps
+\end{verbatim}
+
+\section{含畸变合并的LUT生成补充伪代码}
+\label{apx:pseudocode-dist}
+
+在上述伪代码的基础上，将投影步骤替换为含畸变版本：
+
+\begin{verbatim}
+# ... 在计算 d_i 之后 ...
+x_u = d_i[0] / d_i[2]  # 无畸变归一化坐标
+y_u = d_i[1] / d_i[2]
+
+# 畸变施加 (迭代求解)
+x_d, y_d = apply_distortion(x_u, y_u, dist_coeffs)
+
+# 投影到畸变图像像素
+u_i = K[0,0] * x_d + K[0,2]
+v_i = K[1,1] * y_d + K[1,2]
+# 其余相同 ...
+\end{verbatim}
+
+% --------------------------------------------------
+\section*{符号表}
+\label{apx:symbols}
+
+\renewcommand{\arraystretch}{1.4}
+\begin{tabularx}{\textwidth}{lX}
+\toprule
+\textbf{符号} & \textbf{说明} \\
+\midrule
+$\vect{p}_i = [u_i, v_i, 1]\trans$ & 相机$i$图像像素的齐次坐标 \\
+$\mat{K}_i$ & 相机$i$内参矩阵 \\
+$\vect{d}_i = \mat{K}_i\inv\vect{p}_i$ & 相机$i$归一化方向向量 \\
+$\mat{R}_{ij}$ & 相机$j$坐标系到相机$i$坐标系的旋转（$\vect{X}_i = \mat{R}_{ij}\vect{X}_j$） \\
+$\vect{T}_{ij}$ & 相机$j$原点在相机$i$坐标系下的平移 \\
+$\mat{R}_{iw}$ & 世界坐标系到相机$i$坐标系的旋转 \\
+$\vect{d}_w$ & 世界/全景坐标系下的单位方向向量（球面） \\
+$(\theta, \phi)$ & 全景经纬角（方位角、仰角） \\
+$(f_p, c_{x,p}, c_{y,p})$ & 全景投影参数 \\
+$f_{x,i}, f_{y,i}, c_{x,i}, c_{y,i}$ & 相机$i$焦距与主点 \\
+$(k_1, k_2, k_3, p_1, p_2)$ & 畸变系数（径向+切向） \\
+$\mathcal{D}$ & 畸变施加映射 \\
+$\mathcal{U}$ & 去畸变映射 \\
+$\vect{n}$ & 平面单位法向量 \\
+$d$ & 相机光心到平面的距离 \\
+$\lambda_i$ & 相机$i$坐标系下空间点的深度 \\
+$\mat{H}_{ij}$ & 相机$j$到相机$i$的单应矩阵（纯旋转） \\
+$\mat{H}_{ij}^{\Pi}$ & 相机$j$到相机$i$的平面诱导单应矩阵 \\
+$\proj^2$ & 二维射影空间 \\
+$\mathbb{S}^2$ & 二维单位球面 \\
+\bottomrule
+\end{tabularx}

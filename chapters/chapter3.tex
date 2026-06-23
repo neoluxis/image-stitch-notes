@@ -1,0 +1,123 @@
+% ============================================================
+% Chapter 3: 纯旋转变换 + 光心重合 + 含畸变
+% ============================================================
+\section{纯旋转变换 + 光心重合 + 含畸变}
+\label{sec:rotate-distort}
+
+\textbf{条件：}光心重合、仅存在旋转关系，但相机存在显著镜头畸变，且\emph{不在预处理中单独去畸变}，而是将畸变校正合并到LUT中。
+
+% --------------------------------------------------
+\subsection{畸变分离式LUT（两步法）}
+\label{sec:two-step}
+
+最直接的方法：先对每帧源图像做去畸变得到无畸变图像，再使用\cref{sec:rotate-only}的无畸变LUT。
+
+\begin{resultbox}[两步法流程]
+\textbf{离线LUT}（与\cref{sec:multi-rot}完全相同）存储无畸变坐标。
+
+\textbf{运行时}：
+\begin{enumerate}[leftmargin=*]
+  \item 对每帧原始图像$\vect{I}_i^{\text{(raw)}}$执行去畸变：$\vect{I}_i = \mathcal{U}(\vect{I}_i^{\text{(raw)}})$；
+  \item 用无畸变LUT从$\vect{I}_i$采样拼接。
+\end{enumerate}
+\end{resultbox}
+
+两步法操作简单，但需要运行时去畸变，增加了计算量。
+
+% --------------------------------------------------
+\subsection{畸变合并式LUT（一步法）}
+\label{sec:one-step}
+
+更高效的方法：将畸变映射$\mathcal{D}$直接编码进LUT，运行时从畸变原图直接采样。
+
+\subsubsection{推导}
+
+完整投影链（无畸变世界方向 → 畸变图像像素）为：
+\begin{equation}
+\vect{d}_w \;\xrightarrow{\mat{R}_{iw}}\; \vect{d}_i = [x_u, y_u, 1]\trans
+\;\xrightarrow{\mathcal{D}}\; [x_d, y_d, 1]\trans
+\;\xrightarrow{\mat{K}_i}\; \vect{p}_i^{\text{(raw)}}
+\label{eq:full-chain}
+\end{equation}
+
+显式写出：
+\begin{align}
+x_u &= \frac{(\mat{R}_{iw}\vect{d}_w)_x}{(\mat{R}_{iw}\vect{d}_w)_z},
+\quad
+y_u = \frac{(\mat{R}_{iw}\vect{d}_w)_y}{(\mat{R}_{iw}\vect{d}_w)_z} \label{eq:xu-yu} \\
+(x_d, y_d) &= \mathcal{D}(x_u, y_u) \label{eq:distort-step} \\
+u_i^{\text{(raw)}} &= f_{x,i}\,x_d + c_{x,i},\quad
+v_i^{\text{(raw)}} = f_{y,i}\,y_d + c_{y,i} \label{eq:raw-pixel}
+\end{align}
+
+\begin{theorem}[一步法畸变合并LUT]
+在光心重合条件下，全景像素$(u_p,v_p)$到畸变源图像像素$(u_i^{\text{(raw)}}, v_i^{\text{(raw)}})$的完整映射为：
+\begin{equation}
+\begin{bmatrix}
+u_i^{\text{(raw)}} \\[2pt] v_i^{\text{(raw)}}
+\end{bmatrix}
+=
+\mat{K}_i^{\text{(aff)}}\;
+\mathcal{D}\!\left(
+\frac{(\mat{R}_{iw}\,\vect{d}_w)_{x:y}}{(\mat{R}_{iw}\,\vect{d}_w)_z}
+\right)
+\label{eq:one-step-main}
+\end{equation}
+其中$\mat{K}_i^{\text{(aff)}} = \text{diag}(f_{x,i}, f_{y,i})\cdot[\vect{x}_d; \vect{y}_d] + [c_{x,i}; c_{y,i}]$为内参仿射部分，$(\cdot)_{x:y}$表示取向量的前两个分量，$(\cdot)_z$为第三分量。
+\end{theorem}
+\begin{finalbox}
+纯旋转、光心重合、含畸变条件下的一步法LUT公式：
+\[
+\begin{aligned}
+\vect{d}_w &=
+\begin{bmatrix}
+\cos\phi\sin\theta \\ \sin\phi \\ \cos\phi\cos\theta
+\end{bmatrix},
+\quad
+\theta = \frac{u_p-c_{x,p}}{f_p},\;
+\phi   = \frac{v_p-c_{y,p}}{f_p} \\[8pt]
+\vect{d}_i &= \mat{R}_{iw}\,\vect{d}_w
+\quad\Longrightarrow\quad
+x_u = d_{i,x}/d_{i,z},\;\; y_u = d_{i,y}/d_{i,z} \\[4pt]
+(x_d, y_d) &= \mathcal{D}(x_u, y_u) \quad\text{（畸变施加映射）} \\[4pt]
+u_i^{\text{(raw)}} &= f_{x,i}\,x_d + c_{x,i},\quad
+v_i^{\text{(raw)}} = f_{y,i}\,y_d + c_{y,i}
+\end{aligned}
+\]
+此映射与深度无关，LUT为\emph{固定二维表}，可离线一次生成。
+\end{finalbox}
+
+\subsubsection{畸变施加映射\texorpdfstring{$\mathcal{D}$}{D}的计算}
+
+由于标准畸变模型\eqref{eq:undistort-x}--\eqref{eq:undistort-y}给出的是去畸变方向$\mathcal{U}: (x_d,y_d) \mapsto (x_u,y_u)$，而LUT需要逆向映射$\mathcal{D} = \mathcal{U}\inv: (x_u,y_u) \mapsto (x_d,y_d)$。该逆映射通常无解析闭式，但可在LUT预计算阶段通过以下方法精确求解：
+
+\begin{enumerate}[label=方法\arabic*:, leftmargin=*]
+  \item \textbf{Newton--Raphson迭代}：以$(x_u, y_u)$为目标，迭代求解$(x_d, y_d)$使得$\mathcal{U}(x_d, y_d) - (x_u, y_u) = \vect{0}$。在绝大多数实际畸变参数下，3--5次迭代即可收敛到亚像素精度。
+  \item \textbf{近似解析逆}：利用关系$r_u \approx r_d(1 + k_1 r_d^2 + k_2 r_d^4)$，求解关于$r_d$的多项式方程。对大多民用镜头精度足够。
+  \item \textbf{离散查表+插值}：预计算一个稠密的$(x_u, y_u) \to (x_d, y_d)$网格，LUT中通过双线性插值查询。适合畸变极大的镜头（如鱼眼）。
+\end{enumerate}
+
+由于此计算在离线阶段完成，对运行时性能无影响。
+
+% --------------------------------------------------
+\subsection{多相机阵列含畸变LUT}
+\label{sec:multi-rot-dist}
+
+对于$N$个相机的阵列，只需将\cref{sec:one-step}的推导对每个相机$i$独立执行即可。
+
+\begin{finalbox}
+多相机阵列、纯旋转、光心重合、含畸变条件下，全景像素$(u_p,v_p)$到相机$i$畸变图像的LUT公式：
+\[
+\begin{bmatrix}
+u_i^{\text{(raw)}}(u_p,v_p) \\[2pt] v_i^{\text{(raw)}}(u_p,v_p)
+\end{bmatrix}
+=
+\mathcal{P}_i^{\text{distort}}\Bigl(\mat{R}_{iw}\,\vect{d}_w(\theta,\phi)\Bigr)
+\]
+其中$\mathcal{P}_i^{\text{distort}}(\vect{d}) = \mat{K}_i \circ \mathcal{D} \circ \pi^{-1}(\vect{d})$为相机$i$的\emph{完整投影算子}（含畸变），$\vect{d}_w(\theta,\phi)$同\eqref{eq:dw}，$(\theta,\phi)$由\eqref{eq:pano-pixel-to-angle}给出。
+
+对于每个相机的LUT，存储两个二维数组$\text{map}_x^{(i)},\text{map}_y^{(i)}$，运行时直接：
+\[
+\vect{P}(u_p,v_p) \leftarrow \vect{I}_i^{\text{(raw)}}\bigl(\text{map}_x^{(i)}(u_p,v_p),\; \text{map}_y^{(i)}(u_p,v_p)\bigr)
+\]
+\end{finalbox}

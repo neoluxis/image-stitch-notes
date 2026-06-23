@@ -1,0 +1,120 @@
+%!TEX program = xelatex
+\documentclass[12pt,a4paper]{ctexart}
+
+% === Packages ===
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{mathtools}
+\usepackage{geometry}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta, positioning, shapes.geometric, shadows, fit, backgrounds}
+\usepackage{hyperref}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{enumitem}
+\usepackage{bm}
+\usepackage{tcolorbox}
+\usepackage{cleveref}
+\usepackage{fancyhdr}
+\usepackage{float}
+
+\geometry{a4paper, margin=2.5cm, headheight=15pt}
+\hypersetup{hidelinks}
+
+% === TOC: no indent for any level ===
+\makeatletter
+\renewcommand*\l@section{\@dottedtocline{1}{0em}{1.8em}}
+\renewcommand*\l@subsection{\@dottedtocline{2}{0em}{2.4em}}
+\renewcommand*\l@subsubsection{\@dottedtocline{3}{0em}{3.0em}}
+\makeatother
+
+% === Theorem environments ===
+\newtheorem{theorem}{定理}[section]
+\newtheorem{lemma}[theorem]{引理}
+\newtheorem{corollary}[theorem]{推论}
+\newtheorem{proposition}[theorem]{命题}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{定义}
+\newtheorem{remark}[theorem]{注记}
+\theoremstyle{definition}
+\newtheorem{example}[theorem]{例}
+
+% === Custom commands ===
+\newcommand{\vect}[1]{\bm{#1}}
+\newcommand{\mat}[1]{\bm{#1}}
+\newcommand{\trans}{^{\mathsf{T}}}
+\newcommand{\inv}{^{-1}}
+\newcommand{\norm}[1]{\lVert#1\rVert}
+\newcommand{\abs}[1]{\lvert#1\rvert}
+\newcommand{\inner}[2]{\langle#1,#2\rangle}
+\newcommand{\simto}{\sim}
+\newcommand{\real}{\mathbb{R}}
+\newcommand{\proj}{\mathbb{P}}
+
+% === Result box ===
+\newtcolorbox{resultbox}[1][]{
+  colback=blue!5!white,
+  colframe=blue!75!black,
+  fonttitle=\bfseries,
+  title={#1},
+  arc=4pt,
+  before skip=12pt,
+  after skip=12pt
+}
+
+\newtcolorbox{finalbox}{
+  colback=red!3!white,
+  colframe=red!70!black,
+  fonttitle=\bfseries,
+  title={本章最终LUT公式},
+  arc=4pt,
+  before skip=12pt,
+  after skip=12pt
+}
+
+% === Page style ===
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small 基于预标定与查表的全景拼接——数学推理}
+\fancyhead[R]{\small\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+% ============================================
+\title{\textbf{基于预标定与查表的图像全景拼接算法\\[6pt] 数学推理与LUT变换公式}}
+\author{K Lee}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{empty}
+
+\begin{abstract}
+\noindent 本文系统推导了基于相机预标定参数与离线查表（Look-Up Table, LUT）进行图像全景拼接的完整数学框架。
+涵盖\emph{相机标定方法}（张氏标定、立体标定、多相机阵列标定、误差传播分析），
+按\emph{变换方式}（纯旋转、纯平移、旋转+平移）、\emph{相机数量}（双相机、多相机阵列）、\emph{光心是否重合}、\emph{有无畸变}四个维度，
+分章节给出每种情形下的精确或近似LUT变换矩阵/公式。
+每章末尾以加框公式给出该情形对应的最终查表映射，可直接用于工程实现。
+\end{abstract}
+
+\newpage
+\pagestyle{empty}
+\tableofcontents
+
+\newpage
+\pagenumbering{arabic}
+\setcounter{page}{1}
+\pagestyle{fancy}
+
+% ============================================================
+\include{chapters/chapter1}
+\include{chapters/chapter-calibration}
+\include{chapters/chapter2}
+\include{chapters/chapter3}
+\include{chapters/chapter4}
+\include{chapters/chapter5}
+\include{chapters/chapter6}
+
+\appendix
+\include{chapters/appendix}
+
+\end{document}

@@ -1,0 +1,238 @@
+% ============================================================
+% Chapter 2: 纯旋转变换 + 光心重合 + 无畸变
+% ============================================================
+\section{纯旋转变换 + 光心重合 + 无畸变}
+\label{sec:rotate-only}
+
+\textbf{条件：}两相机（或阵列中所有相机）光心\emph{严格重合}，即$\vect{T} = \vect{0}$；各相机之间仅有旋转关系；不考虑镜头畸变（或已事先校正）。这是LUT查表法最经典、最精确的适用场景。
+
+% --------------------------------------------------
+\subsection{双相机——单应矩阵LUT}
+\label{sec:dual-rot}
+
+\subsubsection{推导}
+
+在$\vect{T}_{21} = \vect{0}$条件下，一般映射方程\eqref{eq:general-pair-map}简化为：
+\begin{equation}
+\vect{p}_2 \simto \mat{K}_2 \mat{R}_{21}\, \lambda_1 \mat{K}_1\inv \vect{p}_1
+      \simto \mat{K}_2 \mat{R}_{21} \mat{K}_1\inv \vect{p}_1
+\label{eq:rot-only-p2}
+\end{equation}
+其中$\lambda_1$被齐次等价关系吸收——这是纯旋转的关键性质：\textbf{深度因子在齐次投影下消去}。
+
+于是得到一个$3\times 3$的平面单应矩阵（Homography）$\mat{H}_{21}$：
+\begin{equation}
+\mat{H}_{21} = \mat{K}_2\,\mat{R}_{21}\,\mat{K}_1\inv
+\label{eq:H21}
+\end{equation}
+
+\begin{theorem}[纯旋转双相机映射]
+在光心重合、无畸变条件下，相机1图像到相机2图像的像素映射由一个$3\times 3$单应矩阵$\mat{H}_{21}$完全确定：
+\begin{equation}
+\begin{bmatrix}
+\tilde{u}_2 \\ \tilde{v}_2 \\ \tilde{w}_2
+\end{bmatrix}
+=
+\mat{H}_{21}
+\begin{bmatrix}
+u_1 \\ v_1 \\ 1
+\end{bmatrix},
+\qquad
+u_2 = \frac{\tilde{u}_2}{\tilde{w}_2},\quad
+v_2 = \frac{\tilde{v}_2}{\tilde{w}_2}
+\label{eq:H21-explicit}
+\end{equation}
+该映射与场景深度\emph{完全无关}，是全局精确的。
+\end{theorem}
+
+\subsubsection{LUT构建}
+
+根据LUT框架（\cref{sec:lut-framework}），以相机1图像为全景参考平面（等价于虚拟全景相机与相机1对齐），则LUT就是$\mat{H}_{21}$的逐像素计算：
+
+\begin{resultbox}[双相机纯旋转LUT构建算法]
+对相机2图像中的每个目标像素$(u_2, v_2)$（若采用后向映射），或对相机1图像的每个源像素$(u_1, v_1)$（前向映射）：
+
+\textbf{前向LUT}（从相机1到相机2的映射表）：
+\begin{align}
+\begin{bmatrix}
+\tilde{u}_2 \\ \tilde{v}_2 \\ \tilde{w}_2
+\end{bmatrix}
+&=
+\mat{H}_{21}
+\begin{bmatrix}
+u_1 \\ v_1 \\ 1
+\end{bmatrix}, \\
+\text{map}_x(u_2, v_2) &\leftarrow u_1,\quad
+\text{map}_y(u_2, v_2) \leftarrow v_1
+\quad\Bigl(\text{在}(u_2,v_2)=\bigl(\frac{\tilde{u}_2}{\tilde{w}_2},\frac{\tilde{v}_2}{\tilde{w}_2}\bigr)\text{处}\Bigr) \nonumber
+\end{align}
+
+\textbf{后向LUT}（推荐，无空洞）：
+\begin{align}
+\mat{H}_{12} &= \mat{H}_{21}\inv = \mat{K}_1 \mat{R}_{21}\trans \mat{K}_2\inv, \\
+\begin{bmatrix}
+\tilde{u}_1 \\ \tilde{v}_1 \\ \tilde{w}_1
+\end{bmatrix}
+&=
+\mat{H}_{12}
+\begin{bmatrix}
+u_2 \\ v_2 \\ 1
+\end{bmatrix}, \\
+\text{map}_x(u_2, v_2) &= \frac{\tilde{u}_1}{\tilde{w}_1},\quad
+\text{map}_y(u_2, v_2) = \frac{\tilde{v}_1}{\tilde{w}_1}
+\end{align}
+\end{resultbox}
+
+\begin{finalbox}
+双相机、纯旋转、光心重合、无畸变条件下，两图像之间的LUT由一个$3\times 3$单应矩阵决定：
+\[
+\mat{H}_{21} = \mat{K}_2\,\mat{R}_{21}\,\mat{K}_1\inv
+\]
+后向LUT查询公式：
+\[
+\vect{p}_1(u_2,v_2) \simto \mat{K}_1\,\mat{R}_{21}\trans\,\mat{K}_2\inv\,\vect{p}_2
+\]
+\end{finalbox}
+
+% --------------------------------------------------
+\subsection{多相机阵列——球面统一投影LUT}
+\label{sec:multi-rot}
+
+\subsubsection{推导}
+
+当$N$个相机（$N \ge 2$）组成阵列、且所有相机光心\emph{近似或严格重合}时，统一到全景球面坐标系是最佳方案。
+
+对于全景图上的每个像素$(u_p, v_p)$，由\eqref{eq:pano-pixel-to-angle}和\eqref{eq:dw}确定世界方向$\vect{d}_w$。对于相机$i$，由\eqref{eq:world-cam-rot}得到相机坐标系方向$\vect{d}_i$：
+\begin{equation}
+\vect{d}_i = \mat{R}_{iw}\,\vect{d}_w
+\label{eq:di-from-dw}
+\end{equation}
+
+再由投影方程\eqref{eq:projection}得到该方向在相机$i$图像上的像素坐标：
+\begin{equation}
+\vect{p}_i \simto \mat{K}_i\,\vect{d}_i = \mat{K}_i\,\mat{R}_{iw}\,\vect{d}_w
+\label{eq:multi-rot-proj}
+\end{equation}
+
+展开为显式形式：
+\begin{equation}
+\begin{bmatrix}
+\tilde{u}_i \\ \tilde{v}_i \\ \tilde{w}_i
+\end{bmatrix}
+=
+\mat{K}_i\,\mat{R}_{iw}\,
+\begin{bmatrix}
+\cos\phi\sin\theta \\ \sin\phi \\ \cos\phi\cos\theta
+\end{bmatrix},
+\qquad
+u_i = \frac{\tilde{u}_i}{\tilde{w}_i},\quad
+v_i = \frac{\tilde{v}_i}{\tilde{w}_i}
+\label{eq:multi-rot-full}
+\end{equation}
+
+其中$(\theta,\phi)$由\eqref{eq:pano-pixel-to-angle}从$(u_p, v_p)$计算得到。
+
+\begin{theorem}[多相机纯旋转全景映射]
+在光心重合、无畸变条件下，全景图像素$(u_p, v_p)$到相机$i$图像像素$(u_i, v_i)$的映射为：
+\begin{equation}
+\vect{p}_i \simto \mat{K}_i\,\mat{R}_{iw}\,\vect{d}_w\!\left(\frac{u_p-c_{x,p}}{f_p},\; \frac{v_p-c_{y,p}}{f_p}\right)
+\label{eq:multi-rot-main}
+\end{equation}
+该映射与场景深度完全无关，是全局精确的。
+\end{theorem}
+
+\subsubsection{定义变换矩阵\texorpdfstring{$\mat{M}_i$}{M\_i}}
+
+将球面角度计算与旋转合并，可定义相机$i$的\emph{等效投影矩阵}：
+\begin{equation}
+\mat{M}_i(\theta, \phi) = \mat{K}_i\,\mat{R}_{iw}\,
+\begin{bmatrix}
+\cos\phi\sin\theta \\
+\sin\phi \\
+\cos\phi\cos\theta
+\end{bmatrix}
+\in \real^{3}
+\label{eq:Mi}
+\end{equation}
+
+注意$\mat{M}_i$并非固定$3\times 3$矩阵，而是依赖于$(\theta,\phi)$（从而依赖于$(u_p,v_p)$）的$3\times 1$向量——这是因为球面投影本身是非线性的。但对于每个全景像素而言，这就是一个确定的三维齐次向量。
+
+\subsubsection{LUT构建}
+
+\begin{resultbox}[多相机阵列纯旋转LUT构建算法]
+\textbf{预处理}（离线）：
+\begin{enumerate}[label=(\arabic*), leftmargin=*]
+  \item 对全景图每个像素$(u_p, v_p)$：
+  \begin{enumerate}
+    \item 计算$(\theta,\phi) = \bigl(\frac{u_p-c_{x,p}}{f_p},\; \frac{v_p-c_{y,p}}{f_p}\bigr)$；
+    \item 计算$\vect{d}_w = [\cos\phi\sin\theta,\; \sin\phi,\; \cos\phi\cos\theta]\trans$；
+    \item 对每个相机$i$：
+    \begin{enumerate}
+      \item 计算$\vect{d}_i = \mat{R}_{iw}\,\vect{d}_w$；
+      \item 投影：$[\tilde{u}_i,\tilde{v}_i,\tilde{w}_i]\trans = \mat{K}_i\,\vect{d}_i$；
+      \item 归一化：$u_i = \tilde{u}_i/\tilde{w}_i,\; v_i = \tilde{v}_i/\tilde{w}_i$；
+      \item 若$(u_i, v_i)$在相机$i$的有效图像范围内（$0 \le u_i < W_i,\; 0 \le v_i < H_i$），则：
+      \[
+      \text{map}_x^{(i)}(u_p, v_p) = u_i,\qquad
+      \text{map}_y^{(i)}(u_p, v_p) = v_i
+      \]
+    \end{enumerate}
+  \end{enumerate}
+\end{enumerate}
+
+\textbf{运行时}：对每帧，对每个相机$i$执行：
+\[
+\vect{P}(u_p,v_p) \leftarrow \vect{I}_i\bigl(\text{map}_x^{(i)}(u_p,v_p),\; \text{map}_y^{(i)}(u_p,v_p)\bigr)
+\]
+结合重叠区域融合策略填充全景图。
+\end{resultbox}
+
+\begin{finalbox}
+多相机阵列、纯旋转、光心重合、无畸变条件下，全景像素$(u_p,v_p)$到相机$i$的LUT映射为：
+\[
+\begin{bmatrix}
+u_i \\ v_i
+\end{bmatrix}
+=
+\pi_i\Bigl(\mat{R}_{iw}\,\vect{d}_w(\theta,\phi)\Bigr),
+\quad
+\theta = \frac{u_p-c_{x,p}}{f_p},\;
+\phi   = \frac{v_p-c_{y,p}}{f_p}
+\]
+其中$\pi_i(\vect{d}) = \bigl(f_{x,i}\frac{d_x}{d_z}+c_{x,i},\; f_{y,i}\frac{d_y}{d_z}+c_{y,i}\bigr)$为相机$i$的投影函数，$\vect{d}_w(\theta,\phi)$由\eqref{eq:dw}给出。等价地，以齐次形式：
+\[
+\vect{p}_i \simto \mat{K}_i\,\mat{R}_{iw}\,
+\begin{bmatrix}
+\cos\!\bigl(\frac{v_p-c_{y,p}}{f_p}\bigr)\sin\!\bigl(\frac{u_p-c_{x,p}}{f_p}\bigr) \\[4pt]
+\sin\!\bigl(\frac{v_p-c_{y,p}}{f_p}\bigr) \\[4pt]
+\cos\!\bigl(\frac{v_p-c_{y,p}}{f_p}\bigr)\cos\!\bigl(\frac{u_p-c_{x,p}}{f_p}\bigr)
+\end{bmatrix}
+\]
+\end{finalbox}
+
+% --------------------------------------------------
+\subsection{重叠区域融合}
+\label{sec:blending}
+
+若全景像素$(u_p, v_p)$同时被$M$个相机覆盖（$M \ge 2$），需进行融合。
+
+\begin{definition}[线性渐入渐出融合]
+设全景像素$(u_p, v_p)$到相机$i$有效图像边界的最近距离为$d_i$，定义融合权重：
+\begin{equation}
+\alpha_i(u_p, v_p) = \frac{d_i}{\sum_{j=1}^{M} d_j}
+\label{eq:alpha}
+\end{equation}
+则融合后全景像素值为：
+\begin{equation}
+\vect{P}(u_p, v_p) = \sum_{i=1}^{M} \alpha_i(u_p, v_p)\;
+\vect{I}_i\bigl(\text{map}_x^{(i)}(u_p,v_p),\; \text{map}_y^{(i)}(u_p,v_p)\bigr)
+\label{eq:blending}
+\end{equation}
+\end{definition}
+
+也可将融合权重直接编码进LUT，定义加权LUT：
+\begin{equation}
+\text{map}_w^{(i)}(u_p, v_p) = \alpha_i(u_p, v_p)
+\label{eq:weight-lut}
+\end{equation}
+运行时执行加权采样。

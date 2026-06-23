@@ -1,0 +1,403 @@
+% ============================================================
+% Chapter: 相机标定方法
+% ============================================================
+\section{相机标定方法}
+\label{sec:calibration}
+
+前文已建立LUT拼接的完整数学框架，其全部依赖已知的标定参数——内参矩阵$\mat{K}_i$、畸变系数$(k_1,k_2,k_3,p_1,p_2)$、相机间外参$(\mat{R}_{ij},\vect{T}_{ij})$以及世界坐标系到各相机的旋转$\mat{R}_{iw}$。本章系统推导这些参数的标定方法及标定误差对LUT的影响。
+
+\subsection{单相机内参标定——张正友平面标定法}
+\label{sec:zhang}
+
+张氏标定法（Zhang, 2000）是目前最广泛使用的相机标定方法，仅需拍摄若干不同姿态下的平面棋盘格图案。
+
+\subsubsection{基本模型}
+
+设平面标定板位于世界坐标系$Z_w=0$平面，其上的三维点$\vect{X}_w = [X_w, Y_w, 0]\trans$。相机投影方程为：
+\begin{equation}
+\vect{p} \simto \mat{K}\bigl[\mat{R} \mid \vect{t}\bigr]
+\begin{bmatrix}
+X_w \\ Y_w \\ 0 \\ 1
+\end{bmatrix}
+= \mat{K}\bigl[\vect{r}_1 \;\; \vect{r}_2 \;\; \vect{t}\bigr]
+\begin{bmatrix}
+X_w \\ Y_w \\ 1
+\end{bmatrix}
+\label{eq:zhang-proj}
+\end{equation}
+其中$\mat{R} = [\vect{r}_1\; \vect{r}_2\; \vect{r}_3]$，$\vect{t}$为世界坐标系到相机坐标系的变换。
+
+由于$Z_w=0$，三维到二维的映射退化为平面单应：
+\begin{equation}
+\vect{p} \simto \mat{H}
+\begin{bmatrix}
+X_w \\ Y_w \\ 1
+\end{bmatrix},
+\qquad
+\mat{H} = \mat{K}\bigl[\vect{r}_1 \;\; \vect{r}_2 \;\; \vect{t}\bigr]
+\label{eq:zhang-H}
+\end{equation}
+
+\subsubsection{单应矩阵估计}
+
+对每幅标定图像$j$（$j = 1, \dots, M$），从$N$个角点（$N \ge 4$）的像素坐标$(u_{j,n}, v_{j,n})$与世界坐标$(X_{w,n}, Y_{w,n})$的对应关系，通过直接线性变换（DLT）估计$3\times 3$单应矩阵$\mat{H}_j$。
+
+对每个角点$n$，齐次映射$\vect{p}_n \simto \mat{H}\,\vect{X}_{w,n}$写出两个线性方程（消去齐次因子）：
+\begin{align}
+\vect{h}_1\trans\vect{X}_{w,n} - u_n\,\vect{h}_3\trans\vect{X}_{w,n} &= 0 \label{eq:dlt-1} \\
+\vect{h}_2\trans\vect{X}_{w,n} - v_n\,\vect{h}_3\trans\vect{X}_{w,n} &= 0 \label{eq:dlt-2}
+\end{align}
+其中$\vect{h}_k\trans$为$\mat{H}$的第$k$行。$N$个点提供$2N$个方程，可用SVD求解（$\mat{H}$有8个自由度，需$N \ge 4$）。
+
+\subsubsection{解析求解内参——旋转矩阵的正交约束}
+
+单应矩阵$\mat{H} = [\vect{h}_1\; \vect{h}_2\; \vect{h}_3]$已估计。由\eqref{eq:zhang-H}：
+\begin{equation}
+[\vect{h}_1 \;\; \vect{h}_2 \;\; \vect{h}_3] = \lambda\,\mat{K}\,[\vect{r}_1 \;\; \vect{r}_2 \;\; \vect{t}]
+\label{eq:H-decomp}
+\end{equation}
+其中$\lambda$为任意尺度因子（$\mat{H}$只能确定到尺度）。
+
+利用$\vect{r}_1,\vect{r}_2$的正交性（$\mat{R}$为旋转矩阵）：
+\begin{align}
+\vect{r}_1\trans\vect{r}_2 &= 0 \label{eq:orth1} \\
+\vect{r}_1\trans\vect{r}_1 = \vect{r}_2\trans\vect{r}_2 &= 1 \label{eq:orth2}
+\end{align}
+
+由\eqref{eq:H-decomp}：$\vect{r}_1 = \lambda\inv\mat{K}\inv\vect{h}_1,\; \vect{r}_2 = \lambda\inv\mat{K}\inv\vect{h}_2$。代入\eqref{eq:orth1}--\eqref{eq:orth2}得到两个对内参$\mat{K}$的约束：
+\begin{align}
+\vect{h}_1\trans\mat{K}^{-\mathsf{T}}\mat{K}\inv\vect{h}_2 &= 0 \label{eq:con1} \\
+\vect{h}_1\trans\mat{K}^{-\mathsf{T}}\mat{K}\inv\vect{h}_1 &=
+\vect{h}_2\trans\mat{K}^{-\mathsf{T}}\mat{K}\inv\vect{h}_2 \label{eq:con2}
+\end{align}
+
+\begin{definition}[绝对二次曲线的像（Image of Absolute Conic, IAC）]
+定义对称矩阵$\mat{B} = \mat{K}^{-\mathsf{T}}\mat{K}\inv$。展开后$\mat{B}$由6个独立参数表示：
+\begin{equation}
+\mat{B} =
+\begin{bmatrix}
+B_{11} & B_{12} & B_{13} \\
+B_{12} & B_{22} & B_{23} \\
+B_{13} & B_{23} & B_{33}
+\end{bmatrix}
+\label{eq:B-matrix}
+\end{equation}
+\end{definition}
+
+每个单应矩阵提供两个约束方程\eqref{eq:con1}--\eqref{eq:con2}，可写为关于$\vect{b} = [B_{11}, B_{12}, B_{22}, B_{13}, B_{23}, B_{33}]\trans$的线性方程：
+\begin{equation}
+\begin{bmatrix}
+\vect{v}_{12}\trans \\ (\vect{v}_{11} - \vect{v}_{22})\trans
+\end{bmatrix}
+\vect{b} = \vect{0}
+\label{eq:v-matrix}
+\end{equation}
+其中$\vect{v}_{pq}$为由$\mat{H}$的列构造的$6\times 1$向量。$M \ge 3$幅不同姿态的图像可提供$2M \ge 6$个方程，通过SVD求解$\vect{b}$（进而得到$\mat{B}$）。
+
+\subsubsection{从\texorpdfstring{$\mat{B}$}{B}解析提取内参}
+
+由$\mat{B} = \mat{K}^{-\mathsf{T}}\mat{K}\inv$，可解析反解出各内参：
+\begin{align}
+c_y &= \frac{B_{12}B_{13} - B_{11}B_{23}}{B_{11}B_{22} - B_{12}^2} \label{eq:extract-cy} \\[4pt]
+\lambda_0 &= B_{33} - \frac{B_{13}^2 + c_y(B_{12}B_{13} - B_{11}B_{23})}{B_{11}} \label{eq:extract-lambda} \\[4pt]
+f_x &= \sqrt{\frac{\lambda_0}{B_{11}}} \label{eq:extract-fx} \\[4pt]
+f_y &= \sqrt{\frac{\lambda_0 B_{11}}{B_{11}B_{22} - B_{12}^2}} \label{eq:extract-fy} \\[4pt]
+s   &= -\frac{B_{12} f_x^2 f_y}{\lambda_0} \qquad (\text{skew，通常}\, \approx 0) \label{eq:extract-s} \\[4pt]
+c_x &= \frac{s c_y}{f_y} - \frac{B_{13} f_x^2}{\lambda_0} \label{eq:extract-cx}
+\end{align}
+当假设像素无倾斜（$s=0$，现代CMOS传感器普遍满足）时，上述公式简化为：
+\begin{align}
+f_x &= \sqrt{\frac{\lambda_0}{B_{11}}}, \qquad
+f_y = \sqrt{\frac{\lambda_0 B_{11}}{B_{11}B_{22} - B_{12}^2}} \label{eq:simple-f} \\
+c_x &= -\frac{B_{13}f_x^2}{\lambda_0}, \qquad
+c_y = \frac{B_{12}B_{13} - B_{11}B_{23}}{B_{11}B_{22} - B_{12}^2} \label{eq:simple-c}
+\end{align}
+\subsubsection{求解外参}
+对内参$\mat{K}$已知的每幅图像，外参可从单应矩阵恢复（$\lambda = 1/\|\mat{K}\inv\vect{h}_1\|$）：
+\begin{align}
+\vect{r}_1 &= \lambda \mat{K}\inv \vect{h}_1 \label{eq:ext-r1} \\
+\vect{r}_2 &= \lambda \mat{K}\inv \vect{h}_2 \label{eq:ext-r2} \\
+\vect{r}_3 &= \vect{r}_1 \times \vect{r}_2 \label{eq:ext-r3} \\
+\vect{t}   &= \lambda \mat{K}\inv \vect{h}_3 \label{eq:ext-t}
+\end{align}
+由于噪声，$[\vect{r}_1\; \vect{r}_2\; \vect{r}_3]$未必严格正交，需通过SVD投影到最近$SO(3)$矩阵：$\mat{R} = \mat{U}\,\text{diag}(1,1,\det(\mat{U}\mat{V}\trans))\,\mat{V}\trans$。
+\subsubsection{非线性优化——Levenberg--Marquardt}
+解析解作为初值，通过最小化重投影误差对全部参数进行非线性优化：
+\begin{equation}
+\min_{\mat{K},\{\mat{R}_j,\vect{t}_j\},\{k_\ell,p_m\}}
+\sum_{j=1}^{M}\sum_{n=1}^{N}
+\Bigl\|\vect{p}_{j,n}^{\text{(obs)}} - \hat{\vect{p}}_{j,n}\bigl(\mat{K}, \mat{R}_j, \vect{t}_j, k_1,k_2,k_3,p_1,p_2, \vect{X}_{w,n}\bigr)\Bigr\|^2
+\label{eq:lm-opt}
+\end{equation}
+其中$\hat{\vect{p}}_{j,n}$为投影函数（含畸变模型\eqref{eq:undistort-x}--\eqref{eq:undistort-y}）。此即\textbf{张氏标定法的完整优化目标}。
+\begin{resultbox}[单相机标定所需的输入与输出]
+\textbf{输入：}$M$幅（建议$10\sim20$幅）不同姿态下的棋盘格图像，棋盘格角点数$N \times N$，方格物理尺寸。
+\textbf{输出：}
+\[
+\mat{K} = \begin{bmatrix} f_x & s & c_x \\ 0 & f_y & c_y \\ 0 & 0 & 1 \end{bmatrix},\quad
+\text{distCoeffs} = [k_1, k_2, p_1, p_2, k_3]\trans
+\]
+\end{resultbox}
+
+% --------------------------------------------------
+\subsection{双相机外参标定——立体标定}
+\label{sec:stereo-calib}
+
+对于双相机系统，需标定相机间的相对位姿$(\mat{R}_{21}, \vect{T}_{21})$。
+
+\subsubsection{方法一：同时立体标定}
+
+两个相机同时拍摄同一标定板的多组姿态（两相机均能看到棋盘格）。在每个姿态$j$下，利用\cref{sec:zhang}的方法分别求解各相机的外参$(\mat{R}_{1,j}, \vect{t}_{1,j})$和$(\mat{R}_{2,j}, \vect{t}_{2,j})$（均相对于世界坐标系，即标定板）。
+
+相机2到相机1的变换为：
+\begin{equation}
+\mat{R}_{21} = \frac{1}{M}\sum_{j=1}^{M} \mat{R}_{1,j}\,\mat{R}_{2,j}\trans
+\quad(\text{平均后投影到}SO(3))
+\label{eq:R21-stereo}
+\end{equation}
+\begin{equation}
+\vect{T}_{21} = \frac{1}{M}\sum_{j=1}^{M} \bigl(\vect{t}_{1,j} - \mat{R}_{1,j}\,\mat{R}_{2,j}\trans\,\vect{t}_{2,j}\bigr)
+\label{eq:T21-stereo}
+\end{equation}
+
+推导依据：$\vect{X}_1 = \mat{R}_{1,j}\vect{X}_w + \vect{t}_{1,j}$，$\vect{X}_2 = \mat{R}_{2,j}\vect{X}_w + \vect{t}_{2,j}$。消去$\vect{X}_w$：
+\[
+\vect{X}_1 = \mat{R}_{1,j}\mat{R}_{2,j}\trans(\vect{X}_2 - \vect{t}_{2,j}) + \vect{t}_{1,j}
+          = \underbrace{\mat{R}_{1,j}\mat{R}_{2,j}\trans}_{\mat{R}_{21}}\vect{X}_2 + \underbrace{(\vect{t}_{1,j} - \mat{R}_{1,j}\mat{R}_{2,j}\trans\vect{t}_{2,j})}_{\vect{T}_{21}}
+\]
+
+\subsubsection{方法二：已知各自内参后的本质矩阵分解}
+
+若两相机内参已单独标定，可通过匹配特征点计算本质矩阵$\mat{E} = \mat{K}_2\trans\,\mat{F}\,\mat{K}_1$（$\mat{F}$为基础矩阵），然后对$\mat{E}$进行SVD分解恢复$(\mat{R}_{21}, \vect{T}_{21})$（有四组可能解，通过chirality check选取正确解）。此方法可在线进行，不依赖标定板同时可见。
+
+\subsubsection{联合优化——立体Bundle Adjustment}
+
+将两相机的内外参与畸变联合进行LM优化：
+\begin{equation}
+\min \sum_{j=1}^{M}\sum_{i=1}^{2}\sum_{n=1}^{N}
+\bigl\|\vect{p}_{i,j,n}^{\text{(obs)}} - \hat{\vect{p}}_{i,j,n}(\mat{K}_i, \mat{R}_{21}, \vect{T}_{21}, \mat{R}_{1,j}, \vect{t}_{1,j}, \text{dist}_i)\bigr\|^2
+\label{eq:stereo-ba}
+\end{equation}
+
+\begin{finalbox}
+双相机外参标定结果：
+\[
+\mat{R}_{21} \in SO(3),\qquad \vect{T}_{21} \in \real^3
+\]
+此为LUT单应矩阵$\mat{H}_{21} = \mat{K}_2\mat{R}_{21}\mat{K}_1\inv$（\cref{eq:H21}）或平面诱导单应$\mat{H}_{21}^{\Pi}$（\cref{eq:H-plane-general}）的核心输入。
+\end{finalbox}
+
+% --------------------------------------------------
+\subsection{多相机阵列标定}
+\label{sec:multi-calib}
+
+$N$个相机构成刚性阵列时，需确定每个相机在世界（全景）坐标系下的位姿$(\mat{R}_{iw}, \vect{T}_{i0})$。
+
+\subsubsection{方法一：链式标定}
+
+若相邻相机之间有足够重叠视场，可通过逐对标定构建位姿图（Pose Graph）：
+\begin{enumerate}[leftmargin=*]
+  \item 对所有有重叠的相机对$(i,j)$，进行双目标定得到$(\mat{R}_{ij}, \vect{T}_{ij})$；
+  \item 选定参考相机0（$\mat{R}_{00}=\mat{I}, \vect{T}_{00}=\vect{0}$），通过位姿链传播：
+  \[
+  \mat{R}_{i0} = \mat{R}_{i,i-1}\,\mat{R}_{i-1,i-2}\,\cdots\,\mat{R}_{10},
+  \qquad
+  \vect{T}_{i0} = \vect{T}_{i,i-1} + \mat{R}_{i,i-1}\vect{T}_{i-1,i-2} + \cdots
+  \]
+  \item 通过位姿图优化（Pose Graph Optimization）消除累积误差。
+\end{enumerate}
+
+\subsubsection{方法二：全局Bundle Adjustment}
+
+在所有相机同时观测到标定板的姿态下（或使用多个标定板覆盖各相机视场），进行全局联合优化：
+\begin{equation}
+\min \sum_{i=1}^{N}\sum_{j=1}^{M}\sum_{n=1}^{N_{\text{pts}}}
+\bigl\|\vect{p}_{i,j,n}^{\text{(obs)}} - \hat{\vect{p}}_{i,j,n}(\mat{K}_i, \mat{R}_{i0}, \vect{T}_{i0}, \mat{R}_{w,j}, \vect{t}_{w,j}, \text{dist}_i)\bigr\|^2
+\label{eq:global-ba}
+\end{equation}
+
+\subsubsection{无重叠视场的阵列标定}
+
+当相机间无重叠视场时（如环视车载相机），可使用：
+\begin{enumerate}[leftmargin=*]
+  \item \textbf{大型标定场}：在标定车间地面绘制全局标定图案，各相机从各自角度观测不同区域，通过已知的全局图案坐标关联各相机；
+  \item \textbf{手眼标定（Hand-Eye Calibration）}：利用相机阵列的刚性约束$\mat{R}_{ij} = \mat{R}_i\mat{R}_j\trans$，通过运动恢复结构（SfM）求解各相机位姿；
+  \item \textbf{镜面/折射辅助}：使用平面镜使无重叠的相机观测到同一标定板。
+\end{enumerate}
+
+\begin{finalbox}
+多相机阵列标定结果（用于LUT全景拼接）：
+\[
+\mat{K}_i,\quad \mat{R}_{iw} = \mat{R}_{i0}\inv,\quad \text{distCoeffs}_i \qquad (i = 0,1,\dots,N-1)
+\]
+其中$\mat{R}_{iw}$直接用于球面全景LUT公式$\vect{p}_i \simto \mat{K}_i\mat{R}_{iw}\vect{d}_w$（\cref{eq:multi-rot-main}），$\vect{T}_{i0}$用于平面诱导单应或含深度映射。
+\end{finalbox}
+
+% --------------------------------------------------
+\subsection{标定误差对LUT精度的影响分析}
+\label{sec:calib-error-propagation}
+
+标定参数的不确定性会传播到LUT坐标。本节给出各参数误差的一阶灵敏度分析。
+
+\subsubsection{内参误差的像素映射偏差}
+
+设内参误差$\Delta\mat{K}_i = \mat{K}_i^{\text{(true)}} - \mat{K}_i^{\text{(est)}}$。对于任意全景方向$\vect{d}_w$，纯旋转LUT的像素偏差为：
+\begin{equation}
+\Delta\vect{p}_i \approx \frac{\partial \vect{p}_i}{\partial \mat{K}_i}\,\Delta\mat{K}_i
+=
+\frac{\partial}{\partial\mat{K}_i}\Bigl(\mat{K}_i\mat{R}_{iw}\vect{d}_w\Bigr)\,\Delta\mat{K}_i
+\label{eq:k-error}
+\end{equation}
+
+展开（令$\vect{d}_i = \mat{R}_{iw}\vect{d}_w = [x,y,z]\trans$）：
+\begin{align}
+\Delta u_i &\approx \frac{x}{z}\,\Delta f_x + \Delta c_x
+            - \frac{f_x x}{z^2}\,\Delta z \quad(\Delta z\approx 0\text{ 对旋转}) \label{eq:du-dk} \\
+\Delta v_i &\approx \frac{y}{z}\,\Delta f_y + \Delta c_y \label{eq:dv-dk}
+\end{align}
+
+\begin{proposition}[内参误差界]
+对于视场角FOV内的全景像素，主点误差$\Delta c_x, \Delta c_y$造成固定的像素偏移，焦距相对误差$\Delta f_x/f_x$造成的偏移与方向角$\arctan(x/z)$成正比，在图像边缘（大角度）最显著：
+\[
+|\Delta u_i|_{\max} \approx |\Delta c_x| + \tan(\text{FOV}/2)\cdot\frac{|\Delta f_x|}{f_x}\cdot f_x
+\]
+\end{proposition}
+
+\subsubsection{旋转标定误差的像素映射偏差}
+
+设旋转误差$\Delta\mat{R}$（微小旋转，可用旋转向量$\Delta\vect{\omega}$表示，$\|\Delta\vect{\omega}\| \ll 1$）：
+\begin{equation}
+\vect{p}_i^{\text{(est)}} \simto \mat{K}_i\,\exp([\Delta\vect{\omega}]_\times)\,\mat{R}_{iw}^{\text{(true)}}\,\vect{d}_w
+\label{eq:r-error}
+\end{equation}
+
+一阶近似下（令$\mat{R}_{iw}^{\text{(true)}}\vect{d}_w = [x,y,z]\trans$）：
+\begin{align}
+\Delta u_i &\approx \frac{f_x}{z^2}\Bigl(
+              -\Delta\omega_z\,x\,y + \Delta\omega_y\,(x^2+z^2) - \Delta\omega_x\,y\,z
+              \Bigr) \label{eq:du-dr} \\
+\Delta v_i &\approx \frac{f_y}{z^2}\Bigl(
+              -\Delta\omega_z\,(y^2+z^2) + \Delta\omega_y\,x\,y + \Delta\omega_x\,x\,z
+              \Bigr) \label{eq:dv-dr}
+\end{align}
+
+\begin{proposition}[旋转误差界]
+全景图像边缘处（$|x/z|$或$|y/z|$较大），旋转标定误差被焦距放大：
+\[
+\|\Delta\vect{p}_i\|_{\max} \approx \|\Delta\vect{\omega}\| \cdot f_{\max} \cdot \sec^2(\text{FOV}/2)
+\]
+若要求拼接误差$<1$\,px，对$f=1000$\,px的相机，旋转标定精度需达到$\sim 0.06^\circ$。
+\end{proposition}
+
+\subsubsection{平移标定误差的影响}
+
+平移误差$\Delta\vect{T}$仅影响非纯旋转情形（\cref{sec:translate-only}, \ref{sec:rt-general}）。对于平面诱导单应$\mat{H}_{21}^{\Pi}$：
+\begin{equation}
+\Delta\mat{H}_{21}^{\Pi} \approx \mat{K}_2\,\frac{\Delta\vect{T}_{21}\,\vect{n}\trans}{d}\,\mat{K}_1\inv
+\label{eq:t-error-H}
+\end{equation}
+
+平移误差的影响与$1/d$成正比——场景越远，平移标定精度要求越低。
+
+\begin{corollary}[标定精度需求汇总]
+\centering
+\small
+\begin{tabular}{p{3cm}p{3.5cm}p{3.5cm}p{3cm}}
+\toprule
+\textbf{参数} & \textbf{影响方式} & \textbf{误差放大因子} & \textbf{典型精度需求} \\
+\midrule
+$f_x, f_y$ & 图像边缘放大 & $\tan(\text{FOV}/2)$ & $<0.5\%$相对误差 \\
+$c_x, c_y$ & 全局平移 & $1$ & $<0.5$\,px \\
+$\mat{R}$   & 图像边缘放大 & $f\cdot\sec^2(\text{FOV}/2)$ & $<0.05^\circ$ \\
+$\vect{T}$  & 与$1/d$成正比 & $f/d$ & 远距离不敏感 \\
+畸变系数   & 图像边缘放大 & $\propto r^3$（径向3次） & $<1\%$相对误差 \\
+\bottomrule
+\end{tabular}
+\label{tab:calib-precision}
+\end{corollary}
+
+% --------------------------------------------------
+\subsection{标定流程与LUT生成管线的集成}
+\label{sec:calib-pipeline}
+
+\begin{figure}[H]
+\centering
+\small
+\begin{tikzpicture}[
+  node distance=5mm,
+  box/.style={
+    draw=black!70, fill=black!3, rounded corners=3pt,
+    text width=13cm, align=left, inner sep=8pt,
+    font=\footnotesize
+  },
+  arrow/.style={->, >=stealth, thick, black!60},
+  stagelabel/.style={font=\bfseries\footnotesize, inner sep=0pt, outer sep=0pt},
+]
+
+% --- 标定阶段 ---
+\node[stagelabel] (label1) {标定阶段};
+
+\node[box, below=2mm of label1] (calib) {
+  \textbf{1. 单相机标定（每相机独立）} \\
+  \quad 棋盘格拍摄 $\to$ 角点检测 $\to$ DLT初始 $\to$ LM优化 \\
+  \quad $\to$ $\{\mat{K}_i,\ \text{distCoeffs}_i\}$ \\[3pt]
+  \textbf{2. 多相机外参标定} \\
+  \quad 立体标定 / 全局BA $\to$ $\{\mat{R}_{iw},\ \vect{T}_{i0}\}$ \\[3pt]
+  \textbf{3. 验证：} 重投影误差 $< 0.3\ \text{px}$
+};
+
+% --- Arrow 1 ---
+\draw[arrow] ([yshift=-2mm]calib.south) -- node[right, font=\footnotesize] {标定参数（一次性）} ++(0,-8mm);
+
+% --- LUT生成阶段 ---
+\node[stagelabel, below=12mm of calib.south] (label2) {LUT生成阶段（离线）};
+
+\node[box, below=2mm of label2] (lutgen) {
+  \textbf{for each} $(u_p, v_p)$ in 全景图: \\
+  \quad $\vect{d}_w = \text{equirectangular}(u_p, v_p)$ \\
+  \quad \textbf{for each} camera $i$: \\
+  \qquad $\vect{d}_i = \mat{R}_{iw}\,\vect{d}_w$ \\
+  \qquad $(x_u, y_u) = (d_{i,x}/d_{i,z},\ d_{i,y}/d_{i,z})$ \\
+  \qquad $(x_d, y_d) = \mathcal{D}(x_u, y_u \mid \text{distCoeffs}_i)$ \\
+  \qquad $\text{map}_x^{(i)}[v_p,u_p] = f_{x,i}\,x_d + c_{x,i}$ \\
+  \qquad $\text{map}_y^{(i)}[v_p,u_p] = f_{y,i}\,y_d + c_{y,i}$ \\
+  $\to$ 保存LUT文件（\texttt{float32}数组）
+};
+
+% --- Arrow 2 ---
+\draw[arrow] ([yshift=-2mm]lutgen.south) -- node[right, font=\footnotesize] {预计算LUT（一次性）} ++(0,-8mm);
+
+% --- 运行阶段 ---
+\node[stagelabel, below=12mm of lutgen.south] (label3) {运行阶段（每帧）};
+
+\node[box, below=2mm of label3] (runtime) {
+  \textbf{for each} frame: \\
+  \quad \textbf{for each} camera $i$: \\
+  \qquad $\texttt{cv::remap}(\vect{I}_i,\ \vect{P},\ \text{map}_x^{(i)},\ \text{map}_y^{(i)},\ \texttt{INTER\_LINEAR})$ \\
+  \quad $\texttt{blend}(\vect{P})$ $\to$ \textbf{输出全景图}
+};
+
+\end{tikzpicture}
+\caption{标定—LUT生成—运行时拼接的完整管线}
+\label{fig:pipeline}
+\end{figure}
+
+\begin{finalbox}
+标定参数与LUT各章公式的对应关系：
+\begin{center}
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{标定输出} & \textbf{符号} & \textbf{LUT公式引用} \\
+\midrule
+内参矩阵       & $\mat{K}_i$ & \cref{eq:H21}, \eqref{eq:multi-rot-main} \\
+畸变系数       & $(k_1,k_2,k_3,p_1,p_2)$ & \cref{eq:one-step-main}, \eqref{eq:undistort-x} \\
+相机间旋转     & $\mat{R}_{ij}$ & \cref{eq:H21} \\
+相机间平移     & $\vect{T}_{ij}$ & \cref{eq:H-plane-trans}, \eqref{eq:H-plane-general} \\
+世界—相机旋转 & $\mat{R}_{iw}$ & \cref{eq:multi-rot-main}, \eqref{eq:di-from-dw} \\
+阵列内各相机位移 & $\vect{T}_{i0}$ & \cref{eq:Hi0-plane}, \eqref{eq:multi-depth} \\
+重投影RMSE    & $\varepsilon_{\text{reproj}}$ & 误差传播：\cref{sec:calib-error-propagation} \\
+\bottomrule
+\end{tabular}
+\end{center}
+\end{finalbox}
