@@ -1,4 +1,5 @@
-%!TEX program = xelatex
+% !TeX encoding = UTF-8
+% !TEX program = xelatex
 \documentclass[12pt,a4paper]{ctexart}
 
 % === Packages ===
@@ -82,7 +83,7 @@
 
 % ============================================
 \title{\textbf{基于预标定与查表的图像全景拼接算法\\[6pt] 数学推理与LUT变换公式}}
-\author{K Lee}
+\author{K. Lee}
 \date{\today}
 
 \begin{document}
@@ -108,14 +109,14 @@
 \pagestyle{fancy}
 
 % ============================================================
-\include{chapters/chapter1}
-\include{chapters/chapter-calibration}
-\include{chapters/chapter2}
-\include{chapters/chapter3}
-\include{chapters/chapter4}
-\include{chapters/chapter5}
-\include{chapters/chapter6}
-\include{chapters/chapter-feature-matching}
+\include{chapters/fundamentals}
+\include{chapters/calibration}
+\include{chapters/pure-rotation}
+\include{chapters/pure-rotation-distortion}
+\include{chapters/pure-translation}
+\include{chapters/rotation-translation}
+\include{chapters/lut-summary}
+\include{chapters/feature-matching}
 
 \appendix
 \include{chapters/appendix}
